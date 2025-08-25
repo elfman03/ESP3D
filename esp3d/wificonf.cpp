@@ -698,6 +698,9 @@ bool WIFI_CONFIG::Disable_servers()
 #ifdef MKS_UPLOAD_M28EMU
     mksEmu_upload_server->stop();
 #endif
+#ifdef LOGMAGIC_PORT
+    logmagic_server->stop();
+#endif
 #ifdef CAPTIVE_PORTAL_FEATURE
     if (WiFi.getMode() != WIFI_STA ) {
         dnsServer.stop();

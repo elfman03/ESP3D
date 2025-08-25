@@ -64,9 +64,6 @@ void ESPCOM::bridge(bool async)
 #ifdef MKS_UPLOAD_M28EMU
             ESPCOM::processFromTCP2mksEmu();
 #endif
-#ifdef LOGMAGIC_PORT
-            ESPCOM::processLogMagic();
-#endif
 #ifdef TCP_IP_DATA_FEATURE
             ESPCOM::processFromTCP2Serial();
 #endif
@@ -516,15 +513,27 @@ void ESPCOM::processLogMagic()
 {
   //check if there is a new clients
   if (logmagic_server->hasClient() ) {
-    if(!logmagic_client || !logmagic_client.connected()) {
+    if(!logmagic_client || (logmagic_client && !logmagic_client.connected())) {
       logmagic_client = logmagic_server->available();
     } else {
       WiFiClient ctmp = logmagic_server->available();
       ctmp.stop();
     }
   }
+  if (logmagic_client && logmagic_client.connected()) {
+    //
+    // discard data from client (want to be write only)
+    //
+    size_t ct,avail;
+    uint8_t data[256];
+    while (avail=logmagic_client.available()) {
+      if(avail>256) { ct=256; } else { ct=avail; }
+      ct = logmagic_client.read(data,ct);
+    }
+  }
 }
 #endif
+
 #ifdef MKS_UPLOAD_M28EMU
 void ESPCOM::processFromTCP2mksEmu()
 {
@@ -532,7 +541,7 @@ void ESPCOM::processFromTCP2mksEmu()
   size_t ct,avail;
   //check if there is a new clients
   if (mksEmu_upload_server->hasClient() ) {
-    if(!mksEmu_upload_client || !mksEmu_upload_client.connected()) {
+    if(!mksEmu_upload_client || (mksEmu_upload_client && !mksEmu_upload_client.connected())) {
       mksEmu_upload_client = mksEmu_upload_server->available();
       //
       // tell mks side that this is a new connection

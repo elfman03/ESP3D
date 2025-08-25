@@ -288,6 +288,9 @@ void Esp3D::process()
     }
 //read / bridge all input
     ESPCOM::bridge();
+#ifdef LOGMAGIC_PORT
+    ESPCOM::processLogMagic();
+#endif
 //in case of restart requested
     if (web_interface->restartmodule) {
         CONFIG::esp_restart();
