@@ -25,6 +25,12 @@
 #ifdef TCP_IP_DATA_FEATURE
 extern WiFiServer * data_server;
 #endif
+#ifdef MKS_UPLOAD_M28EMU
+extern WiFiServer * mksEmu_upload_server;
+#endif
+#ifdef LOGMAGIC_PORT
+extern WiFiServer * logmagic_server;
+#endif
 
 class ESPCOM
 {
@@ -48,6 +54,20 @@ public:
     static void send2TCP (const __FlashStringHelper *data, bool async = false);
     static void send2TCP (String data, bool async = false);
     static void send2TCP (const char * data, bool async = false);
+#endif
+#ifdef MKS_UPLOAD_M28EMU
+    static void processFromTCP2mksEmu();
+    static void send2mksTCP (const __FlashStringHelper *data, bool isFinal = false);
+    static void send2mksTCP (String data, bool isFinal = false);
+    static void send2mksTCP (const char * data, bool isFinal = false);
+    static void send2mksTCP (const char * data, int len, bool isFinal = false);
+#endif
+#ifdef LOGMAGIC_PORT
+    static void processLogMagic();
+    static void logMagic (const __FlashStringHelper *data, bool isFinal = false);
+    static void logMagic (String data, bool isFinal = false);
+    static void logMagic (const char * data, bool isFinal = false);
+    static void logMagic (const char * data, int len, bool isFinal = false);
 #endif
     static bool block_2_printer;
 #ifdef ESP_OLED_FEATURE

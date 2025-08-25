@@ -21,6 +21,7 @@
 #include "config.h"
 #include "espcom.h"
 #include "command.h"
+#include "mksemu.h"
 #include "webinterface.h"
 #if defined (ASYNCWEBSERVER)
 #include "asyncwebserver.h"
@@ -40,6 +41,16 @@ WiFiServer * data_server;
 WiFiClient serverClients[MAX_SRV_CLIENTS];
 #endif
 
+#ifdef MKS_UPLOAD_M28EMU
+WiFiServer * mksEmu_upload_server;
+WiFiClient mksEmu_upload_client=0;
+#endif
+
+#ifdef LOGMAGIC_PORT
+WiFiServer * logmagic_server;
+WiFiClient logmagic_client=0;
+#endif
+
 bool ESPCOM::block_2_printer = false;
 
 void ESPCOM::bridge(bool async)
@@ -50,6 +61,12 @@ void ESPCOM::bridge(bool async)
 //be sure wifi is on to proceed wifi function
         if ((WiFi.getMode() != WIFI_OFF) || wifi_config.WiFi_on) {
 //read tcp port input
+#ifdef MKS_UPLOAD_M28EMU
+            ESPCOM::processFromTCP2mksEmu();
+#endif
+#ifdef LOGMAGIC_PORT
+            ESPCOM::processLogMagic();
+#endif
 #ifdef TCP_IP_DATA_FEATURE
             ESPCOM::processFromTCP2Serial();
 #endif
@@ -386,6 +403,62 @@ void ESPCOM::send2TCP (const char * data, bool async)
     }
 }
 #endif
+#ifdef MKS_UPLOAD_M28EMU
+void ESPCOM::send2mksTCP (const __FlashStringHelper *data, bool isFinal)
+{
+    String tmp = data;
+    ESPCOM::send2mksTCP (tmp.c_str(), isFinal);
+}
+void ESPCOM::send2mksTCP (String data, bool isFinal)
+{
+    ESPCOM::send2mksTCP (data.c_str(), isFinal);
+}
+void ESPCOM::send2mksTCP (const char * data, bool isFinal)
+{
+    ESPCOM::send2mksTCP (data, strlen(data), isFinal);
+}
+void ESPCOM::send2mksTCP (const char * data, int len, bool isFinal) 
+{
+  if (mksEmu_upload_client && mksEmu_upload_client.connected() ) {
+    if(len>0) {
+      mksEmu_upload_client.write (data, len );
+    }
+    delay (0);
+    if(isFinal) {
+      mksEmu_upload_client.stop();
+      delay (0);
+    } 
+  }
+}
+#endif
+#ifdef LOGMAGIC_PORT
+void ESPCOM::logMagic (const __FlashStringHelper *data, bool isFinal)
+{
+    String tmp = data;
+    ESPCOM::logMagic (tmp.c_str(), isFinal);
+}
+void ESPCOM::logMagic (String data, bool isFinal)
+{
+    ESPCOM::logMagic (data.c_str(), isFinal);
+}
+void ESPCOM::logMagic (const char * data, bool isFinal)
+{
+    ESPCOM::logMagic (data, strlen(data), isFinal);
+}
+void ESPCOM::logMagic (const char * data, int len, bool isFinal) 
+{
+  if (logmagic_client && logmagic_client.connected() ) {
+    if(len>0) {
+      logmagic_client.write (data, len );
+    }
+    delay (0);
+    if(isFinal) {
+      logmagic_client.stop();
+      delay (0);
+    } 
+  }
+}
+#endif
 
 bool ESPCOM::processFromSerial (bool async)
 {
@@ -438,6 +511,60 @@ bool ESPCOM::processFromSerial (bool async)
         return false;
     }
 }
+#ifdef LOGMAGIC_PORT
+void ESPCOM::processLogMagic()
+{
+  //check if there is a new clients
+  if (logmagic_server->hasClient() ) {
+    if(!logmagic_client || !logmagic_client.connected()) {
+      logmagic_client = logmagic_server->available();
+    } else {
+      WiFiClient ctmp = logmagic_server->available();
+      ctmp.stop();
+    }
+  }
+}
+#endif
+#ifdef MKS_UPLOAD_M28EMU
+void ESPCOM::processFromTCP2mksEmu()
+{
+  uint8_t data[256];
+  size_t ct,avail;
+  //check if there is a new clients
+  if (mksEmu_upload_server->hasClient() ) {
+    if(!mksEmu_upload_client || !mksEmu_upload_client.connected()) {
+      mksEmu_upload_client = mksEmu_upload_server->available();
+      //
+      // tell mks side that this is a new connection
+      //
+      MKSEMU::tcp_connection_reset();
+    } else {
+      //
+      // already have an upload client... reject
+      //
+      WiFiClient ctmp = mksEmu_upload_server->available();
+      ctmp.stop();
+    }
+  }
+  //check client for data
+  //to avoid any pollution if Uploading file to SDCard
+  if (!((web_interface->blockserial)  || CONFIG::is_locked(FLAG_BLOCK_TCP) || CONFIG::is_locked(FLAG_BLOCK_SERIAL))) {
+    if (mksEmu_upload_client && mksEmu_upload_client.connected() ) {
+      //
+      //get data from the tcp client and push it to the UART
+      //
+      while (avail=mksEmu_upload_client.available()) {
+	if(avail>256) { ct=256; } else { ct=avail; }
+        ct = mksEmu_upload_client.read(data,ct);
+        //ESPCOM::write(DEFAULT_PRINTER_PIPE, data);
+        //COMMAND::read_buffer_tcp (data);
+        MKSEMU::read_buffer_tcp (data, ct);
+      }
+    }
+  }
+}
+#endif
+
 #ifdef TCP_IP_DATA_FEATURE
 void ESPCOM::processFromTCP2Serial()
 {

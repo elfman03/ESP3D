@@ -118,6 +118,12 @@ void Esp3D::begin(uint16_t startdelayms, uint16_t recoverydelayms)
 #ifdef TCP_IP_DATA_FEATURE
     data_server = NULL;
 #endif
+#ifdef MKS_UPLOAD_M28EMU
+    mksEmu_upload_server = NULL;
+#endif
+#ifdef LOGMAGIC_PORT
+    logmagic_server = NULL;
+#endif
 
 #ifdef MKS_TFT_FEATURE
     startdelayms = 1000;

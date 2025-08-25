@@ -600,6 +600,18 @@ bool WIFI_CONFIG::Enable_servers()
     data_server->begin();
     data_server->setNoDelay (true);
 #endif
+#ifdef LOGMAGIC_PORT
+    logmagic_server = new WiFiServer (LOGMAGIC_PORT);
+    logmagic_server->begin();
+    logmagic_server->setNoDelay (true);
+#endif
+#ifdef MKS_UPLOAD_M28EMU
+    // should be emu upload server at port 80 and regular web at port 8000
+    //mksEmu_upload_server = new WiFiServer (wifi_config.iweb_port-1);
+    mksEmu_upload_server = new WiFiServer (80);
+    mksEmu_upload_server->begin();
+    mksEmu_upload_server->setNoDelay (true);
+#endif
 #if !defined (ASYNCWEBSERVER)
     socket_server = new WebSocketsServer (wifi_config.iweb_port+1);
     socket_server->begin();
@@ -682,6 +694,9 @@ bool WIFI_CONFIG::Disable_servers()
 {
 #ifdef TCP_IP_DATA_FEATURE
     data_server->stop();
+#endif
+#ifdef MKS_UPLOAD_M28EMU
+    mksEmu_upload_server->stop();
 #endif
 #ifdef CAPTIVE_PORTAL_FEATURE
     if (WiFi.getMode() != WIFI_STA ) {
