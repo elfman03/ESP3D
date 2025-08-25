@@ -200,7 +200,7 @@ bool CONFIG::InitBaudrate(long value)
 #ifdef ARDUINO_ARCH_ESP8266
         Serial.begin (baud_rate);
 #else
-        Serial.begin (baud_rate, ESP_SERIAL_PARAM, ESP_RX_PIN, ESP_TX_PIN);
+        Serial.begin (baud_rate, ESP_SERIAL0_PARAM, ESP_RX0_PIN, ESP_TX0_PIN);
 #endif
 
     }
@@ -210,7 +210,7 @@ bool CONFIG::InitBaudrate(long value)
 #ifdef ARDUINO_ARCH_ESP8266
         Serial1.begin (baud_rate);
 #else
-        Serial1.begin (baud_rate, ESP_SERIAL_PARAM, ESP_RX_PIN, ESP_TX_PIN);
+        Serial1.begin (baud_rate, ESP_SERIAL1_PARAM, ESP_RX1_PIN, ESP_TX1_PIN);
 #endif
     }
 #endif
@@ -219,7 +219,7 @@ bool CONFIG::InitBaudrate(long value)
 #ifdef ARDUINO_ARCH_ESP8266
         Serial2.begin (baud_rate);
 #else
-        Serial2.begin (baud_rate, ESP_SERIAL_PARAM, ESP_RX_PIN, ESP_TX_PIN);
+        Serial2.begin (baud_rate, ESP_SERIAL2_PARAM, ESP_RX2_PIN, ESP_TX2_PIN);
 #endif
     }
 #endif

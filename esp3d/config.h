@@ -59,6 +59,11 @@
 
 //MKS TFT WIFI support see Wiki for wiring
 //#define MKS_TFT_FEATURE
+// Converts MKS upload POST into M28/M29 commands
+#define MKS_UPLOAD_M28EMU
+
+// Enables Magic logging to defined port
+#define LOGMAGIC_PORT 7999
 
 //MDNS_FEATURE: this feature allow  type the name defined
 //in web browser by default: http:\\esp8266.local and connect
@@ -103,19 +108,25 @@
 #define SERIAL_RX_BUFFER_SIZE 512
 
 //Serial Parameters
-#define ESP_SERIAL_PARAM SERIAL_8N1
+#define ESP_SERIAL0_PARAM SERIAL_8N1
+#define ESP_SERIAL1_PARAM SERIAL_8N1
+#define ESP_SERIAL2_PARAM SERIAL_8N1
 
 //which serial ESP use to communicate to printer (ESP32 has 3 serials available, ESP8266 only one)
 //Uncomment one only
-#define USE_SERIAL_0
+//#define USE_SERIAL_0
 //For ESP32 Only
-//#define USE_SERIAL_1
+#define USE_SERIAL_1
 //#define USE_SERIAL_2
 
 //Pins Definition ////////////////////////////////////////////////////////////////////////
 //-1 means use default pins of your board what ever the serial you choose
-#define ESP_RX_PIN -1
-#define ESP_TX_PIN -1
+#define ESP_RX0_PIN -1
+#define ESP_TX0_PIN -1
+#define ESP_RX1_PIN 25
+#define ESP_TX1_PIN 26
+#define ESP_RX2_PIN 17
+#define ESP_TX2_PIN 16
 
 #ifdef RECOVERY_FEATURE
 //pin used to reset setting
