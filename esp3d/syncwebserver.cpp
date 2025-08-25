@@ -1173,6 +1173,46 @@ void handle_web_command_silent()
 
 }
 
+#ifdef MKS_UPLOAD_M28EMU
+//
+// emulation of mks file upload POST via M28/M29
+//
+void mksUploadM28Emu() {
+  log_esp3d("mksUploadM28Emu");
+  String fname = "";
+  if (web_interface->web_server.hasArg("X-Filename")) {
+    fname = web_interface->web_server.arg("X-Filename");
+    log_esp3d("Upload EMU Filename %s",fname.c_str());
+  } else {
+    log_esp3d("Invalid arg");
+    web_interface->web_server.send(200,"text/plain","Upload Emulation Missing X-Filename");
+    return;
+  }
+  //web_interface->web_server.send(200,"text/plain","Upload Emulated!\n");
+  HTTPUpload& upload = (web_interface->web_server).upload();
+  //for (uint pos = 0;( pos < upload.currentSize) && (web_interface->_upload_status == UPLOAD_STATUS_ONGOING); pos++) { //parse full post data
+  web_interface->_upload_status=UPLOAD_STATUS_NONE;
+  for (;(web_interface->_upload_status == UPLOAD_STATUS_ONGOING);) {
+    CONFIG::wait(0);
+    if(upload.status == UPLOAD_FILE_START) { 
+      web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
+    }
+    if(upload.status == UPLOAD_FILE_WRITE) { 
+      web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
+    }
+    if(upload.status == UPLOAD_FILE_END) { 
+      web_interface->_upload_status=UPLOAD_STATUS_SUCCESSFUL;
+    }
+    if(upload.status == UPLOAD_FILE_ABORTED) { 
+      web_interface->_upload_status= UPLOAD_STATUS_FAILED;
+    }
+  }
+  web_interface->web_server.sendHeader("Cache-Control", "no-cache");
+  String err="0";
+  String jsonfile = "{\"err\":\"" + err + "\"}";
+  web_interface->web_server.send(200, "application/json", jsonfile);
+}
+#endif
 
 //Serial SD files list//////////////////////////////////////////////////
 void handle_serial_SDFileList()

@@ -36,6 +36,10 @@ extern void SDFile_serial_upload();
 extern WebSocketsServer * socket_server;
 extern void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
 
+#ifdef MKS_UPLOAD_M28EMU
+extern void mksUploadM28Emu();
+#endif
+
 #ifdef SSDP_FEATURE
 extern void handle_SSDP ();
 #endif
