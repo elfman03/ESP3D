@@ -357,9 +357,6 @@ WEBINTERFACE_CLASS::WEBINTERFACE_CLASS (int port) : web_server (port)
     web_server.on ("/command_silent", HTTP_ANY, handle_web_command_silent);
     //Serial SD management
     web_server.on ("/upload_serial", HTTP_ANY, handle_serial_SDFileList, SDFile_serial_upload);
-#ifdef MKS_UPLOAD_M28EMU
-    web_server.on ("/upload", HTTP_POST, mksUploadM28Emu);
-#endif
 
     blockserial = false;
     restartmodule = false;
