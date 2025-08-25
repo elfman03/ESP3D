@@ -31,8 +31,11 @@ public:
     static String buffer_serial;
     static String buffer_tcp;
     static uint8_t bufT2S[256];
+    static char filename[64];
     static size_t bufT2Ssz, T2Sct;
     static int theOp;
+    static int payloadSz;      // how large is the POST payload
+    static int payloadOffset;  // how far into the POST payload are we?
     //static void read_buffer_serial (uint8_t *b, size_t len);
     //static void read_buffer_serial (uint8_t b);
 #ifdef MKS_UPLOAD_M28EMU

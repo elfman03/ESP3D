@@ -28,10 +28,13 @@
 
 String MKSEMU::buffer_serial;
 String MKSEMU::buffer_tcp;
+char   MKSEMU::filename[64];
 uint8_t MKSEMU::bufT2S[256];
 size_t  MKSEMU::bufT2Ssz=0;
 size_t  MKSEMU::T2Sct=0;
 int     MKSEMU::theOp=-1;
+int     MKSEMU::payloadSz=-1;
+int     MKSEMU::payloadOffset=-1;
 
 //extern bool sendLine2Serial (String &  line, int32_t linenb, int32_t* newlinenb);
 
@@ -54,12 +57,16 @@ void MKSEMU::tcp_connection_reset () {
   MKSEMU::bufT2Ssz=0; 
   MKSEMU::T2Sct=0; 
   MKSEMU::theOp=-1;
+  MKSEMU::filename[0]=0;
+  MKSEMU::payloadSz=-1;
+  MKSEMU::payloadOffset=-1;
 }
 
 //read buffer as char
 void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
 {
-  int i;
+  char ctmp[128];
+  int i,space;
   //
   // Have not yet determined operation type (based on initial line starting with "POST /upload?")
   //
@@ -86,7 +93,7 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
       MKSEMU::bufT2Ssz+=ct;
     }
     if(sufficient) {
-      if(strstr((const char*)MKSEMU::bufT2S,"POST /upload?")==(const char*)MKSEMU::bufT2S) {
+      if(strstr((const char*)MKSEMU::bufT2S,"POST /upload?X-Filename=")==(const char*)MKSEMU::bufT2S) {
 	MKSEMU::theOp=1;
       } else {
 	MKSEMU::theOp=0;
@@ -103,21 +110,20 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
     // permanently moved header with our IP and port
     ESPCOM::send2mksTCP("HTTP/1.1 301 Moved Permanently\r\nLocation: http://", false);
     ESPCOM::send2mksTCP(WiFi.localIP().toString(), false);
-    char ctmp[128];
     sprintf(ctmp,":%d",wifi_config.iweb_port);
     ESPCOM::send2mksTCP(ctmp, false);
     //
     // find the URI being requested for the redirection.  e.g., /index.html in GET /index.htm HTTP/1.1
     //
-    // skip to first space
-    for(i=0;MKSEMU::bufT2S[i] && MKSEMU::bufT2S[i]!=' ';i++) { /* intentional */ }
-    if(MKSEMU::bufT2S[i]==' ') {
+    // skip to first space (i.e., after GET/PUT/HEAD
+    for(space=0;MKSEMU::bufT2S[space] && MKSEMU::bufT2S[space]!=' ';) { space++; }
+    if(MKSEMU::bufT2S[space]==' ') {
       // find the HTTP/1...
-      char *p=strstr((char*)&MKSEMU::bufT2S[i+1]," HTTP/");
+      char *p=strstr((char*)&MKSEMU::bufT2S[space+1]," HTTP/");
       if(p) { 
 	// post the URI
 	*p=0; 
-        ESPCOM::send2mksTCP((const char*)&MKSEMU::bufT2S[i+1], false);
+        ESPCOM::send2mksTCP((const char*)&MKSEMU::bufT2S[space+1], false);
 	*p=' '; 
       }
     }
@@ -136,12 +142,27 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
   //
   // Operation IS an MKS upload.  Lets do some magic
   //
-  //ESPCOM::send2mksTCP("HANDLE", false);
-  ESPCOM::logMagic((const char*)bytes, ct, false);
-  //ESPCOM::send2mksTCP((const char*)MKSEMU::bufT2S, false);
-  
-    //ESPCOM::send2mksTCP(buf, false);
-  //ESPCOM::send2mksTCP((const char*)bufT2S, bufT2Ssz, false);
+
+  //
+  // First line! Extract filename from "POST /upload?X-Filename=xxxxxxxxx HTTP/1.1" 
+  //
+  if(!MKSEMU::filename[0]) {
+    ESPCOM::logMagic((const char*)bytes, ct, false);
+
+    // Extract filename which starts at character 24 and should end with a space before end of line
+    for(space=0;MKSEMU::bufT2S[24+space] && MKSEMU::bufT2S[24+space]!=' ';) { space++; }
+    ESPCOM::logMagic(ctmp, false);
+    // if the length is zero error out and close connection
+    if(!MKSEMU::bufT2S[24+space]) { ESPCOM::send2mksTCP("Filename Syntax Incorrect",true); return; }
+    // make a copy of the filename
+    for(i=0;i<space;i++) {
+      MKSEMU::filename[i]=MKSEMU::bufT2S[24+i];
+    }
+    MKSEMU::filename[i]=0;
+
+    sprintf(ctmp,"FILENAME: --%s--\n",MKSEMU::filename);
+    ESPCOM::logMagic(ctmp, false);
+  }
 }
 #endif
 /*
