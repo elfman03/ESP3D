@@ -62,11 +62,52 @@ void MKSEMU::tcp_connection_reset () {
   MKSEMU::payloadOffset=-1;
 }
 
+//
+// Pull from incoming bytes buffer to flesh out a full line
+//
+// bytes  -- the inbound byte buffer
+// ct     -- size of the inbound byte buffer
+// offset -- starting offset into the inbound byte buffer
+// expands MKSEMU::bufT2S starting from MKSEMU::bufT2Ssz
+// returns new offset into the inbound byte buffer for next time
+//
+int linefill(uint8_t *bytes, size_t ct, size_t offset) {
+  int i;
+  for(i=offset;i<ct;i++) {
+    //
+    // copy that byte
+    //
+    MKSEMU::bufT2S[MKSEMU::bufT2Ssz]=bytes[i];
+    MKSEMU::bufT2Ssz++;
+    //
+    // check for line max and error out if we hit it
+    //
+    if(MKSEMU::bufT2Ssz>250) {
+      return -1;
+    }
+    if(bytes[i]=='\r') { 
+      MKSEMU::bufT2S[MKSEMU::bufT2Ssz+i]=' ';  // whitespace out <cr>
+    }
+    //
+    // <nl> found.  yay!
+    //
+    if(bytes[i]=='\n') {
+      MKSEMU::bufT2S[MKSEMU::bufT2Ssz]=0;  // null terminate
+      return i+1;
+    }
+  }
+  //
+  // We hit the end of the buffer without a newline.  maintain residual for the next payload.
+  //
+  return ct;
+}
+
 //read buffer as char
 void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
 {
   char ctmp[128];
-  int i,space;
+  int i,space,inputOffset;
+  inputOffset=0;
   //
   // Have not yet determined operation type (based on initial line starting with "POST /upload?")
   //
@@ -75,13 +116,17 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
     for(i=0;i<ct;i++) {
       if((MKSEMU::bufT2Ssz+i)>200) { ESPCOM::send2mksTCP(NULL,0,true); return; } // error out if <CR> not found in 200 bytes
       if(!sufficient) { MKSEMU::bufT2S[MKSEMU::bufT2Ssz+i]=bytes[i]; }           // save off bytes
-      //
-      // <cr> found.  we have enough info
-      //
       if(bytes[i]=='\r') { 
-	MKSEMU::bufT2S[MKSEMU::bufT2Ssz+i]=0;  // null it out
+	MKSEMU::bufT2S[MKSEMU::bufT2Ssz+i]=' ';  // whitespace out <cr>
+      }
+      //
+      // <nl> found.  we have enough info
+      //
+      if(bytes[i]=='\n') { 
+	MKSEMU::bufT2S[MKSEMU::bufT2Ssz+i+1]=0;  // null terminate
 	sufficient=true; 
         MKSEMU::bufT2Ssz+=i;
+	inputOffset=i+1;
 	i=ct; 
       }
     }
@@ -147,11 +192,8 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
   // First line! Extract filename from "POST /upload?X-Filename=xxxxxxxxx HTTP/1.1" 
   //
   if(!MKSEMU::filename[0]) {
-    ESPCOM::logMagic((const char*)bytes, ct, false);
-
     // Extract filename which starts at character 24 and should end with a space before end of line
     for(space=0;MKSEMU::bufT2S[24+space] && MKSEMU::bufT2S[24+space]!=' ';) { space++; }
-    ESPCOM::logMagic(ctmp, false);
     // if the length is zero error out and close connection
     if(!MKSEMU::bufT2S[24+space]) { ESPCOM::send2mksTCP("Filename Syntax Incorrect",true); return; }
     // make a copy of the filename
@@ -160,8 +202,32 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
     }
     MKSEMU::filename[i]=0;
 
-    sprintf(ctmp,"FILENAME: --%s--\n",MKSEMU::filename);
+    sprintf(ctmp,"\nFILENAME: --%s--\n",MKSEMU::filename);
     ESPCOM::logMagic(ctmp, false);
+    MKSEMU::bufT2Ssz=0;
+  }
+
+  //ESPCOM::logMagic((const char*)bytes, ct, false);
+
+  //
+  // At this point we have a filename but still need to extract the payload size.
+  //
+  for(;inputOffset<ct;) {
+    inputOffset=linefill(bytes, ct, inputOffset);
+    //
+    // Is there a complete packet to handle?  Should have a null at last field.
+    //
+    if(!MKSEMU::bufT2S[MKSEMU::bufT2Ssz]) {
+      sprintf(ctmp,"LINE: %d/%d len=%d: ",inputOffset,ct,MKSEMU::bufT2Ssz);
+      ESPCOM::logMagic(ctmp, false);
+      ESPCOM::logMagic((const char*)MKSEMU::bufT2S, false);
+      MKSEMU::bufT2Ssz=0;
+    } else {
+      sprintf(ctmp,"Partial: %d/%d len=%d ... ",inputOffset,ct,MKSEMU::bufT2Ssz);
+      ESPCOM::logMagic(ctmp, false);
+      //ESPCOM::logMagic((const char*)MKSEMU::bufT2S, MKSEMU::bufT2Ssz, false);
+      //ESPCOM::logMagic("\n", false);
+    }
   }
 }
 #endif
