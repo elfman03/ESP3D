@@ -86,13 +86,13 @@ int linefill(uint8_t *bytes, size_t ct, size_t offset) {
       return -1;
     }
     if(bytes[i]=='\r') { 
-      MKSEMU::bufT2S[MKSEMU::bufT2Ssz+i]=' ';  // whitespace out <cr>
+      MKSEMU::bufT2S[MKSEMU::bufT2Ssz-1]=' ';  // whitespace out <cr>
     }
     //
     // <nl> found.  yay!
     //
     if(bytes[i]=='\n') {
-      MKSEMU::bufT2S[MKSEMU::bufT2Ssz]=0;  // null terminate
+      MKSEMU::bufT2S[MKSEMU::bufT2Ssz]=0;  // null terminate after <nl>
       return i+1;
     }
   }
@@ -100,6 +100,51 @@ int linefill(uint8_t *bytes, size_t ct, size_t offset) {
   // We hit the end of the buffer without a newline.  maintain residual for the next payload.
   //
   return ct;
+}
+
+// We have a full line
+// 1. find the payload size
+// 2. find the payload
+// 3. handle the payload
+// 4. detect end of payload
+void handleLine(const char *line, int len) {
+  char ctmp[128];
+  //
+  // if payload size is unknown, detect and handle Content-Length tag
+  //
+  if(MKSEMU::payloadSz==-1) {
+    if(strstr(line,"Content-Length: ")==line) {
+      sscanf(line,"Content-Length: %d",&MKSEMU::payloadSz);
+      sprintf(ctmp,"PAYLOAD SIZE: %d\n",MKSEMU::payloadSz);
+      ESPCOM::logMagic(ctmp, false);
+    }
+    return;
+  }
+  //
+  // if payload size is known we can look for the end of headers and thus start of payload
+  //
+  if(MKSEMU::payloadOffset==-1) {
+    if(strstr(line," \n")==line) {
+      MKSEMU::payloadOffset=0;
+      ESPCOM::logMagic("PAYLOAD START DETECTED\n", false);
+    }
+    return;
+  }
+  //
+  // We are in the payload.  Lets count up and send some serial!
+  //
+  MKSEMU::payloadOffset+=len;
+  //sprintf(ctmp,"payload processed %d/%d\n",MKSEMU::payloadOffset,MKSEMU::payloadSz);
+  //ESPCOM::logMagic(ctmp, false);
+
+  //
+  // handle end of payload condition
+  //
+  if(MKSEMU::payloadOffset>=MKSEMU::payloadSz) {
+    sprintf(ctmp,"DONE!  payload processed %d/%d\n",MKSEMU::payloadOffset,MKSEMU::payloadSz);
+    ESPCOM::logMagic(ctmp, false);
+    ESPCOM::send2mksTCP("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"err\": \"0\"}\r\n", true);
+  }
 }
 
 //read buffer as char
@@ -204,13 +249,17 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
 
     sprintf(ctmp,"\nFILENAME: --%s--\n",MKSEMU::filename);
     ESPCOM::logMagic(ctmp, false);
-    MKSEMU::bufT2Ssz=0;
+    MKSEMU::bufT2Ssz=0; // done with this line
   }
 
   //ESPCOM::logMagic((const char*)bytes, ct, false);
 
   //
-  // At this point we have a filename but still need to extract the payload size.
+  // At this point we have a filename and we can process lines
+  // 1. find the payload size
+  // 2. find the payload
+  // 3. handle the payload
+  // 4. detect end of payload
   //
   for(;inputOffset<ct;) {
     inputOffset=linefill(bytes, ct, inputOffset);
@@ -218,15 +267,14 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
     // Is there a complete packet to handle?  Should have a null at last field.
     //
     if(!MKSEMU::bufT2S[MKSEMU::bufT2Ssz]) {
-      sprintf(ctmp,"LINE: %d/%d len=%d: ",inputOffset,ct,MKSEMU::bufT2Ssz);
-      ESPCOM::logMagic(ctmp, false);
-      ESPCOM::logMagic((const char*)MKSEMU::bufT2S, false);
-      MKSEMU::bufT2Ssz=0;
+      //sprintf(ctmp,"LINE: %d/%d len=%d: ",inputOffset,ct,MKSEMU::bufT2Ssz);
+      //ESPCOM::logMagic(ctmp, false);
+      //ESPCOM::logMagic((const char*)MKSEMU::bufT2S, false);
+      handleLine((const char*)MKSEMU::bufT2S, MKSEMU::bufT2Ssz);
+      MKSEMU::bufT2Ssz=0; // done with this line
     } else {
-      sprintf(ctmp,"Partial: %d/%d len=%d ... ",inputOffset,ct,MKSEMU::bufT2Ssz);
-      ESPCOM::logMagic(ctmp, false);
-      //ESPCOM::logMagic((const char*)MKSEMU::bufT2S, MKSEMU::bufT2Ssz, false);
-      //ESPCOM::logMagic("\n", false);
+      //sprintf(ctmp,"Partial: %d/%d len=%d ... ",inputOffset,ct,MKSEMU::bufT2Ssz);
+      //ESPCOM::logMagic(ctmp, false);
     }
   }
 }
