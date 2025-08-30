@@ -26,6 +26,7 @@
 #define FS_NO_GLOBALS
 #endif
 
+bool can_accept_mksemu_packets=true;
 String MKSEMU::buffer_serial;
 String MKSEMU::buffer_tcp;
 char   MKSEMU::filename[64];
@@ -35,31 +36,22 @@ size_t  MKSEMU::T2Sct=0;
 int     MKSEMU::theOp=-1;
 int     MKSEMU::payloadSz=-1;
 int     MKSEMU::payloadOffset=-1;
+int     MKSEMU::timeoutCt=0;
 
-//extern bool sendLine2Serial (String &  line, int32_t linenb, int32_t* newlinenb);
-
-/*
-//read a buffer in an array
-void COMMAND::read_buffer_serial (uint8_t *b, size_t len)
-{
-    for (size_t i = 0; i < len; i++) {
-        read_buffer_serial (b[i]);
-        //*b++;
-    }
-}
-*/
+extern size_t wait_for_data(uint32_t timeout);
+extern bool purge_serial();
 
 #ifdef MKS_UPLOAD_M28EMU
 void MKSEMU::tcp_connection_reset () {
   //
-  // If first payload in a session we have to determine session type and reset parameters
+  // If first payload in a session we reset the session related variables
   //
-  MKSEMU::bufT2Ssz=0; 
-  MKSEMU::T2Sct=0; 
-  MKSEMU::theOp=-1;
-  MKSEMU::filename[0]=0;
-  MKSEMU::payloadSz=-1;
-  MKSEMU::payloadOffset=-1;
+  MKSEMU::bufT2Ssz=0;            // current size of buffer to send to serial
+  MKSEMU::T2Sct=0;               // ???
+  MKSEMU::theOp=-1;              // state engine to determine if this is an upload
+  MKSEMU::filename[0]=0;         // filename of in process upload
+  MKSEMU::payloadSz=-1;          // the size of the in process upload
+  MKSEMU::payloadOffset=-1;      // the offset into the current upload
 }
 
 //
@@ -82,12 +74,12 @@ int linefill(uint8_t *bytes, size_t ct, size_t offset) {
     //
     // check for line max and error out if we hit it
     //
-    if(MKSEMU::bufT2Ssz>250) {
+    if(MKSEMU::bufT2Ssz>240) {
       return -1;
     }
-    if(bytes[i]=='\r') { 
-      MKSEMU::bufT2S[MKSEMU::bufT2Ssz-1]=' ';  // whitespace out <cr>
-    }
+    //if(bytes[i]=='\r') { 
+    //  MKSEMU::bufT2S[MKSEMU::bufT2Ssz-1]=' ';  // whitespace out <cr>
+    //}
     //
     // <nl> found.  yay!
     //
@@ -102,12 +94,113 @@ int linefill(uint8_t *bytes, size_t ct, size_t offset) {
   return ct;
 }
 
+long fetch_serial_response(char *buf, int targetCt, int maxCt, int timeout) {
+  uint32_t endmilli = timeout+millis();
+  if(buf) { buf[0]=0; }  // clear buf
+  //
+  // wait for enough bytes or for a timeout
+  //
+  int avail=ESPCOM::available(DEFAULT_PRINTER_PIPE);
+  for (;avail<targetCt && (millis()<endmilli);) {
+    CONFIG::wait(10);
+    avail=ESPCOM::available(DEFAULT_PRINTER_PIPE);
+  }
+  if(!buf) { return avail; }               // if buf is null return how many we could have read
+  //
+  // read and return byte count read
+  //
+  int readCt=avail<maxCt?avail:maxCt;
+  readCt=ESPCOM::readBytes(DEFAULT_PRINTER_PIPE,(unsigned char*)buf,readCt);
+  return readCt;
+}
+
+void uploadStart(char *filename) {
+  char ctmp[128];
+  char sbuf[128];
+
+  web_interface->blockserial=true;
+  purge_serial();
+  sprintf(ctmp,"M28 %s\r\n",filename);
+  ESPCOM::write(DEFAULT_PRINTER_PIPE,ctmp);
+  ESPCOM::flush(DEFAULT_PRINTER_PIPE,NULL);
+  MKSEMU::timeoutCt=0;
+  int rdct=fetch_serial_response(sbuf,100,127,1000);
+  sprintf(ctmp,"M28 %s -- rdct=%d -- ",filename,rdct);
+  ESPCOM::logMagic(ctmp, false);
+  if(rdct>0) { ESPCOM::logMagic(sbuf, rdct, false); }
+  ESPCOM::logMagic("\n", false);
+}
+
+void uploadElement(unsigned char *line, int len) {
+  char ctmp[128];
+  char sbuf[128];
+  line[0]=';';
+
+  // Chitu M28 checksum protocol 
+  // https://github.com/Photonsters/PhotonNetworkController/blob/ca5549a4564e5bc8a19b7db638e8373e4aedc16b/frmMain.cs#L441
+  //
+  // insert offset
+  unsigned int off=MKSEMU::payloadOffset;
+  line[len]=off & 0x0ff;
+  off=off>>8;
+  line[len+1]=off & 0x0ff;
+  off=off>>8;
+  line[len+2]=off & 0x0ff;
+  off=off>>8;
+  line[len+3]=off;
+  // insert checksum
+  unsigned char sum=0;
+  for(int i=0;i<(len+4);i++) { sum=sum^line[i]; }
+  line[len+4]=sum;
+  // insert trailer
+  line[len+5]=0x83;
+  sprintf(ctmp,"beg: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x len=%d\n",line[0],line[1],line[2],line[3],line[4],line[5],len);
+  ESPCOM::logMagic(ctmp, false);
+  sprintf(ctmp,"end: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",line[len],line[len+1],line[len+2],line[len+3],line[len+4],line[len+5]);
+  ESPCOM::logMagic(ctmp, false);
+
+  ESPCOM::write(DEFAULT_PRINTER_PIPE,(unsigned char*)line,len+6);
+  ESPCOM::flush(DEFAULT_PRINTER_PIPE,NULL);
+
+  int rdct=fetch_serial_response(sbuf,6,127,1000);
+  if(rdct!=6000) {
+    sprintf(ctmp,"SER %d (from %d) - ",rdct,len);
+    ESPCOM::logMagic(ctmp, false);
+    if(rdct>0) { ESPCOM::logMagic(sbuf, rdct,false); }
+    ESPCOM::logMagic("\n", false);
+  }
+
+  MKSEMU::payloadOffset+=len;
+  MKSEMU::timeoutCt=0;
+  //sprintf(ctmp,"payload processed %d/%d ready=%d\n",MKSEMU::payloadOffset,MKSEMU::payloadSz,ready);
+  //ESPCOM::logMagic(ctmp, false);
+}
+
+void uploadEnd() {
+  char ctmp[128];
+  char sbuf[128];
+
+  purge_serial();
+  sprintf(ctmp,"M29\r\n");
+  ESPCOM::write(DEFAULT_PRINTER_PIPE,ctmp);
+  ESPCOM::flush(DEFAULT_PRINTER_PIPE,NULL);
+  MKSEMU::timeoutCt=0;
+  int rdct=fetch_serial_response(sbuf,8,127,2000);
+  MKSEMU::payloadOffset=-1;
+  sprintf(ctmp,"M29 -- rdct=%d -- ",rdct);
+  ESPCOM::logMagic(ctmp, false);
+  ESPCOM::logMagic(sbuf, rdct, false);
+  ESPCOM::logMagic("\n", false);
+  if(rdct>0) { ESPCOM::logMagic(sbuf, rdct, false); }
+  web_interface->blockserial=false;
+}
+
 // We have a full line
 // 1. find the payload size
 // 2. find the payload
 // 3. handle the payload
 // 4. detect end of payload
-void handleLine(const char *line, int len) {
+void handleLine(char *line, int len) {
   char ctmp[128];
   //
   // if payload size is unknown, detect and handle Content-Length tag
@@ -124,18 +217,17 @@ void handleLine(const char *line, int len) {
   // if payload size is known we can look for the end of headers and thus start of payload
   //
   if(MKSEMU::payloadOffset==-1) {
-    if(strstr(line," \n")==line) {
+    if(strstr(line,"\r\n")==line) {
       MKSEMU::payloadOffset=0;
       ESPCOM::logMagic("PAYLOAD START DETECTED\n", false);
+      uploadStart(MKSEMU::filename);
     }
     return;
   }
   //
   // We are in the payload.  Lets count up and send some serial!
   //
-  MKSEMU::payloadOffset+=len;
-  //sprintf(ctmp,"payload processed %d/%d\n",MKSEMU::payloadOffset,MKSEMU::payloadSz);
-  //ESPCOM::logMagic(ctmp, false);
+  uploadElement((uint8_t *)line,len);
 
   //
   // handle end of payload condition
@@ -143,6 +235,7 @@ void handleLine(const char *line, int len) {
   if(MKSEMU::payloadOffset>=MKSEMU::payloadSz) {
     sprintf(ctmp,"DONE!  payload processed %d/%d\n",MKSEMU::payloadOffset,MKSEMU::payloadSz);
     ESPCOM::logMagic(ctmp, false);
+    uploadEnd();
     ESPCOM::send2mksTCP("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"err\": \"0\"}\r\n", true);
   }
 }
@@ -247,7 +340,7 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
     }
     MKSEMU::filename[i]=0;
 
-    sprintf(ctmp,"\nFILENAME: --%s--\n",MKSEMU::filename);
+    sprintf(ctmp,"FILENAME: %s\n",MKSEMU::filename);
     ESPCOM::logMagic(ctmp, false);
     MKSEMU::bufT2Ssz=0; // done with this line
   }
@@ -261,56 +354,41 @@ void MKSEMU::read_buffer_tcp (uint8_t *bytes, size_t ct)
   // 3. handle the payload
   // 4. detect end of payload
   //
+
+  can_accept_mksemu_packets=false;      // cannot accept more while processing this one
   for(;inputOffset<ct;) {
     inputOffset=linefill(bytes, ct, inputOffset);
     //
     // Is there a complete packet to handle?  Should have a null at last field.
     //
     if(!MKSEMU::bufT2S[MKSEMU::bufT2Ssz]) {
-      //sprintf(ctmp,"LINE: %d/%d len=%d: ",inputOffset,ct,MKSEMU::bufT2Ssz);
-      //ESPCOM::logMagic(ctmp, false);
-      //ESPCOM::logMagic((const char*)MKSEMU::bufT2S, false);
-      handleLine((const char*)MKSEMU::bufT2S, MKSEMU::bufT2Ssz);
+      sprintf(ctmp,"LINE: %d/%d len=%d: ",inputOffset,ct,MKSEMU::bufT2Ssz);
+      ESPCOM::logMagic(ctmp, false);
+      ESPCOM::logMagic((const char*)MKSEMU::bufT2S, false);
+      handleLine((char*)MKSEMU::bufT2S, MKSEMU::bufT2Ssz);
       MKSEMU::bufT2Ssz=0; // done with this line
     } else {
       //sprintf(ctmp,"Partial: %d/%d len=%d ... ",inputOffset,ct,MKSEMU::bufT2Ssz);
       //ESPCOM::logMagic(ctmp, false);
     }
   }
+  can_accept_mksemu_packets=true;  // ready for more pain
+}
+void MKSEMU::read_buffer_serial (uint8_t *b, size_t len) {
+  char ctmp[128];
+
+  if(MKSEMU::payloadOffset==-1) { return; }
+  sprintf(ctmp,"SERIAL %d: ",len);
+  ESPCOM::logMagic(ctmp, false);
+  ESPCOM::logMagic((const char*)b, len, false);
+  ESPCOM::logMagic("\n", false);
+  if(len==4 && strstr((char*)b,"ok\r\n")) {
+    MKSEMU::timeoutCt++;
+    if(MKSEMU::timeoutCt>3) {
+      ESPCOM::send2mksTCP("Timeout",true); 
+      uploadEnd();
+      ESPCOM::logMagic("TIMEOUT!!!  Trying to back out...\n", false);
+    }
+  }
 }
 #endif
-/*
-//read buffer as char
-void COMMAND::read_buffer_serial (uint8_t b)
-{
-    static bool previous_was_char = false;
-    static bool iscomment = false;
-//to ensure it is continuous string, no char separated by binaries
-    if (!previous_was_char) {
-        buffer_serial = "";
-        iscomment = false;
-    }
-//is comment ?
-    if (char (b) == ';') {
-        iscomment = true;
-    }
-//it is a char so add it to buffer
-    if (isPrintable (b) ) {
-        previous_was_char = true;
-        if (!iscomment) {
-            buffer_serial += char (b);
-        }
-    } else {
-        previous_was_char = false; //next call will reset the buffer
-    }
-//this is not printable but end of command check if need to handle it
-    if (b == 13 || b == 10) {
-        //reset comment flag
-        iscomment = false;
-        //Minimum is something like M10 so 3 char
-        if (buffer_serial.length() > 3) {
-            check_command (buffer_serial, DEFAULT_PRINTER_PIPE);
-        }
-    }
-}
-*/

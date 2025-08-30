@@ -24,6 +24,7 @@
 #include <Arduino.h>
 #include "espcom.h"
 
+extern bool can_accept_mksemu_packets;
 
 class MKSEMU
 {
@@ -36,17 +37,12 @@ public:
     static int theOp;
     static int payloadSz;      // how large is the POST payload
     static int payloadOffset;  // how far into the POST payload are we?
-    //static void read_buffer_serial (uint8_t *b, size_t len);
-    //static void read_buffer_serial (uint8_t b);
+    static int timeoutCt;      // timeout sanity during upload
 #ifdef MKS_UPLOAD_M28EMU
     static void tcp_connection_reset ();
+    static void read_buffer_serial (uint8_t *bytes, size_t len);
     static void read_buffer_tcp (uint8_t *bytes, size_t len);
 #endif
-    //static bool check_command (String buffer, tpipe output, bool handlelockserial = true, bool executecmd = true);
-    //static bool execute_command (int cmd, String cmd_params, tpipe output, level_authenticate_type auth_level = LEVEL_GUEST, ESPResponseStream  *espresponse = NULL);
-    //static String get_param (String & cmd_params, const char * id, bool withspace = false);
-    //static bool isadmin (String & cmd_params);
-    //static bool isuser (String & cmd_params);
 };
 
 #endif
