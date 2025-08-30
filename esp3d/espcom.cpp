@@ -62,7 +62,9 @@ void ESPCOM::bridge(bool async)
         if ((WiFi.getMode() != WIFI_OFF) || wifi_config.WiFi_on) {
 //read tcp port input
 #ifdef MKS_UPLOAD_M28EMU
-            ESPCOM::processFromTCP2mksEmu();
+	    if(can_accept_mksemu_packets) {
+              ESPCOM::processFromTCP2mksEmu();
+	    }
 #endif
 #ifdef TCP_IP_DATA_FEATURE
             ESPCOM::processFromTCP2Serial();
@@ -162,6 +164,7 @@ size_t ESPCOM::available(tpipe output)
         break;
     }
 }
+/*
 size_t   ESPCOM::write(tpipe output, uint8_t d)
 {
     if ((DEFAULT_PRINTER_PIPE == output) && (block_2_printer || CONFIG::is_locked(FLAG_BLOCK_SERIAL))) {
@@ -184,6 +187,44 @@ size_t   ESPCOM::write(tpipe output, uint8_t d)
 #ifdef USE_SERIAL_2
     case SERIAL_PIPE:
         return Serial2.write(d);
+        break;
+#endif
+    default:
+        return 0;
+        break;
+    }
+}
+*/
+size_t   ESPCOM::write(tpipe output, uint8_t d) {
+         ESPCOM::write(output, (const unsigned char*)&d, 1);
+}
+size_t   ESPCOM::write(tpipe output, const char *d) {
+         ESPCOM::write(output, (const unsigned char *)d, strlen(d));
+}
+size_t   ESPCOM::write(tpipe output, const unsigned char *d) {
+         ESPCOM::write(output, d, strlen((const char*)d));
+}
+size_t   ESPCOM::write(tpipe output, const unsigned char *d, size_t len) {
+    if ((DEFAULT_PRINTER_PIPE == output) && (block_2_printer || CONFIG::is_locked(FLAG_BLOCK_SERIAL))) {
+        return 0;
+    }
+    if ((SERIAL_PIPE == output) && CONFIG::is_locked(FLAG_BLOCK_SERIAL)) {
+        return 0;
+    }
+    switch (output) {
+#ifdef USE_SERIAL_0
+    case SERIAL_PIPE:
+        return Serial.write(d,len);
+        break;
+#endif
+#ifdef USE_SERIAL_1
+    case SERIAL_PIPE:
+        return Serial1.write(d,len);
+        break;
+#endif
+#ifdef USE_SERIAL_2
+    case SERIAL_PIPE:
+        return Serial2.write(d,len);
         break;
 #endif
     default:
@@ -499,6 +540,9 @@ bool ESPCOM::processFromSerial (bool async)
         }
 #endif
 
+#endif
+#ifdef MKS_UPLOAD_M28EMU
+        MKSEMU::read_buffer_serial (sbuf, len);
 #endif
         //process data if any
         COMMAND::read_buffer_serial (sbuf, len);

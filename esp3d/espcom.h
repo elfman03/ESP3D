@@ -36,6 +36,9 @@ class ESPCOM
 {
 public:
     static size_t  write(tpipe output, uint8_t d);
+    static size_t  write(tpipe output, const char *d);
+    static size_t  write(tpipe output, const unsigned char *d);
+    static size_t  write(tpipe output, const unsigned char *d, size_t len);
     static long readBytes (tpipe output, uint8_t * sbuf, size_t len);
     static long baudRate(tpipe output);
     static size_t available(tpipe output);
