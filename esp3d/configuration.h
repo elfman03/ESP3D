@@ -60,9 +60,12 @@
 /* Serial Communication protocol
  * RAW_SERIAL // Basic serial protocol, without data change
  * MKS_SERIAL // This is a MakerBase communication protocol, used with MKS
+ * CHITU_SERIAL // This is a Chitu communication protocol used by certain 
+ *                 certain chitu esp8266 modules to communication with
+ *                 chitu mainboards (e.g., Qidi X-Plus gen1)
  * printers and TFT, it encapsulated data in a custom protocol
  */
-#define COMMUNICATION_PROTOCOL RAW_SERIAL
+#define COMMUNICATION_PROTOCOL CHITU_SERIAL
 
 /* Main Serial port / Ouptut 
  * which serial ESP use to communicate to printer (ESP32 has 3 serials
@@ -108,7 +111,7 @@
  * SMOOTHIEWARE
  * REPETIER
  */
-#define DEFAULT_FW UNKNOWN_FW
+#define DEFAULT_FW MARLIN
 
 /************************************
  *
@@ -284,7 +287,7 @@
 /* Enable date/time on files
  * Set date/time on files using SNTP or last webui connection
  */
-#define FILESYSTEM_TIMESTAMP_FEATURE
+//#define FILESYSTEM_TIMESTAMP_FEATURE
 
 /************************************
  *

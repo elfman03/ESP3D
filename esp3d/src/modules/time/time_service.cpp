@@ -257,13 +257,13 @@ void TimeService::handle() {
       if (!isSet) {
         esp3d_log("Time set");
         isSet = true;
-#if COMMUNICATION_PROTOCOL != MKS_SERIAL
+#if (COMMUNICATION_PROTOCOL != MKS_SERIAL) && (COMMUNICATION_PROTOCOL != CHITU_SERIAL)
 #if defined(ESP_GOT_DATE_TIME_HOOK) && defined(GCODE_HOST_FEATURE)
         String dateMsg =
             esp3d_string::expandString(ESP_GOT_DATE_TIME_HOOK, true);
         esp3d_gcode_host.processScript(dateMsg.c_str());
 #endif  // #if defined (ESP_GOT_IP_HOOK) && defined (GCODE_HOST_FEATURE)
-#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL
+#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
       }
     }
   }

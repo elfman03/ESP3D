@@ -81,6 +81,15 @@
 #endif  // defined(ESP_SERIAL_BRIDGE_OUTPUT)
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
 
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+#if defined(PRINTER_HAS_DISPLAY)
+#error Chitu serial protocol is not compatible with `PRINTER_HAS_DISPLAY`, comment `PRINTER_HAS_DISPLAY` in configuration.h
+#endif  // defined(PRINTER_HAS_DISPLAY)
+#if defined(ESP_SERIAL_BRIDGE_OUTPUT)
+#error Chitu serial protocol is not compatible with serial bridge output
+#endif  // defined(ESP_SERIAL_BRIDGE_OUTPUT)
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
+
 /**************************
  * USB-Serial
  * ***********************/

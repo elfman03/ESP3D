@@ -95,6 +95,10 @@ class HTTP_Server {
   static void MKSFileupload();
   static void handleMKSUpload();
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+  static void ChituFileupload();
+  static void handleChituUpload();
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 };
 
 extern ESP3DRequest code_200;

@@ -75,7 +75,10 @@ DNSServer dnsServer;
 #endif  // CAMERA_DEVICE
 #if COMMUNICATION_PROTOCOL == MKS_SERIAL
 #include "../mks/mks_service.h"
-#endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#endif  // COMMUNICATION_PROTOCOL == _SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+#include "../chitu/chitu_service.h"
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 
 bool NetServices::_started = false;
 bool NetServices::_restart = false;
@@ -382,16 +385,19 @@ bool NetServices::begin() {
 #if COMMUNICATION_PROTOCOL == MKS_SERIAL
   MKSService::begin();
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+  ChituService::begin();
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
   if (!res) {
     end();
   }
   ESP3DHal::wait(1000);
-#if COMMUNICATION_PROTOCOL != MKS_SERIAL
+#if (COMMUNICATION_PROTOCOL != MKS_SERIAL) && (COMMUNICATION_PROTOCOL != CHITU_SERIAL)
   esp3d_commands.dispatch(NetConfig::localIP().c_str(),
                           ESP3DClientType::all_clients, no_id,
                           ESP3DMessageType::unique, ESP3DClientType::system,
                           ESP3DAuthenticationLevel::admin);
-#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL
+#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL && COMMUNICATION_PROTOCOL != CHITU_SERIAL
   _started = res;
   return _started;
 }
@@ -404,6 +410,9 @@ void NetServices::end() {
 #if COMMUNICATION_PROTOCOL == MKS_SERIAL
   MKSService::end();
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+  ChituService::end();
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #ifdef CAMERA_DEVICE
   esp3d_camera.end();
 #endif  // CAMERA_DEVICE
@@ -456,6 +465,9 @@ void NetServices::handle() {
 #if COMMUNICATION_PROTOCOL == MKS_SERIAL
     MKSService::handle();
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+    ChituService::handle();
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #ifdef MDNS_FEATURE
     esp3d_mDNS.handle();
 #endif  // MDNS_FEATURE

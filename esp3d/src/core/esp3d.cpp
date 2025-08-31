@@ -119,7 +119,7 @@ bool Esp3D::begin() {
   #endif  // USB_SERIAL_FEATURE
 
   // BT do not start automaticaly so should be OK
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 
   // Serial service
   if (!esp3d_serial_service.begin(ESP_SERIAL_OUTPUT)) {
@@ -127,7 +127,7 @@ bool Esp3D::begin() {
     res = false;
   }
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   // Serial bridge
 #if defined(ESP_SERIAL_BRIDGE_OUTPUT)
   if (!serial_bridge_service.begin(ESP_SERIAL_BRIDGE_OUTPUT)) {
@@ -183,10 +183,10 @@ void Esp3D::handle() {
 #if defined(USB_SERIAL_FEATURE)
   esp3d_usb_serial_service.handle();
 #endif  // USB_SERIAL_FEATURE
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   esp3d_serial_service.handle();
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if defined(ESP_SERIAL_BRIDGE_OUTPUT)
   serial_bridge_service.handle();
 #endif  // ESP_SERIAL_BRIDGE_OUTPUT
@@ -228,23 +228,23 @@ bool Esp3D::end() {
 #if defined(USB_SERIAL_FEATURE)
   esp3d_usb_serial_service.end();
 #endif  // USB_SERIAL_FEATURE
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   esp3d_serial_service.end();
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   return true;
 }
 
 // Reset ESP3D settings
 bool Esp3D::reset() {
   bool resetOk = true;
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   if (!esp3d_serial_service.reset()) {
     resetOk = false;
     esp3d_log_e("Reset serial error");
   }
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if defined(ESP_SERIAL_BRIDGE_OUTPUT)
   if (!serial_bridge_service.reset()) {
     resetOk = false;
@@ -268,20 +268,20 @@ void Esp3D::restart_now() {
   digitalWrite(ESP3D_ETH_PHY_POWER_PIN, LOW);
 #endif  // ESP3D_ETH_PHY_POWER_PIN
   esp3d_log("Restarting");
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   if (!esp3d_serial_service.started()) {
     esp3d_serial_service.begin(ESP_SERIAL_OUTPUT);
   }
   esp3d_serial_service.flush();
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if defined(FILESYSTEM_FEATURE)
   ESP_FileSystem::end();
 #endif  // FILESYSTEM_FEATURE
-#if (COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL) & defined(ARDUINO_ARCH_ESP8266)
+#if (COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL) & defined(ARDUINO_ARCH_ESP8266)
   esp3d_serial_service.swap();
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIA || COMMUNICATION_PROTOCOL == CHITU_SERIALL
   ESP.restart();
   while (1) {
     delay(1);

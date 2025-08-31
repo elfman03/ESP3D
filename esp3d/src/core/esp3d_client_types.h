@@ -43,6 +43,7 @@ enum class ESP3DClientType : uint8_t {
   remote_screen = 13,  // target only = M117
   mks_serial = 14,
   lua_script = 15,
+  chitu_serial = 16,
   command,  // origin only
   system,   // origin only
   all_clients

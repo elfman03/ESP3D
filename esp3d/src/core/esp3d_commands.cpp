@@ -52,6 +52,10 @@ const char *esp3dmsgstr[] = {"head", "core", "tail", "unique"};
 #include "../modules/mks/mks_service.h"
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
 
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+#include "../modules/chitu/chitu_service.h"
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
+
 #include "../modules/serial/serial_service.h"
 
 #if defined(TELNET_FEATURE)
@@ -100,6 +104,9 @@ ESP3DCommands::ESP3DCommands() {
 #if COMMUNICATION_PROTOCOL == MKS_SERIAL
   _output_client = ESP3DClientType::mks_serial;
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+  _output_client = ESP3DClientType::chitu_serial;
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if COMMUNICATION_PROTOCOL == SOCKET_SERIAL
   _output_client = ESP3DClientType::socket_serial;
 #endif  //
@@ -1452,6 +1459,16 @@ bool ESP3DCommands::dispatch(ESP3DMessage *msg) {
       }
       break;
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+    case ESP3DClientType::chitu_serial:
+      esp3d_log("Chitu Serial message");
+      if (!ChituService::dispatch(msg)) {
+        sendOk = false;
+        esp3d_log_e("Chitu Serial dispatch failed");
+      }
+      break;
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 
 #if defined(GCODE_HOST_FEATURE)
     case ESP3DClientType::stream:

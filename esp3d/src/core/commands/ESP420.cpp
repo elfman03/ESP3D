@@ -257,7 +257,7 @@ void ESP3DCommands::ESP420(int cmd_params_pos, ESP3DMessage* msg) {
   }
 #endif  // defined(USB_SERIAL_FEATURE)
 
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   if (esp3d_commands.getOutputClient() == ESP3DClientType::serial) {
     // baud rate
     tmpstr = String(esp3d_serial_service.baudRate());
@@ -267,7 +267,7 @@ void ESP3DCommands::ESP420(int cmd_params_pos, ESP3DMessage* msg) {
     }
   }
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 
 #if defined(WIFI_FEATURE)
   if (WiFi.getMode() != WIFI_OFF) {
@@ -677,7 +677,7 @@ void ESP3DCommands::ESP420(int cmd_params_pos, ESP3DMessage* msg) {
   }
 #endif  // TIMESTAMP_FEATURE
 
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   // serial enabled
   if (esp3d_serial_service.started()) {
     tmpstr = "ON (UART";
@@ -691,7 +691,7 @@ void ESP3DCommands::ESP420(int cmd_params_pos, ESP3DMessage* msg) {
     return;
   }
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if defined(ESP_SERIAL_BRIDGE_OUTPUT)
   // serial bridge enabled
   if (serial_bridge_service.started()) {
@@ -798,6 +798,14 @@ void ESP3DCommands::ESP420(int cmd_params_pos, ESP3DMessage* msg) {
     return;
   }
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+  tmpstr = "Chitu";
+  if (!dispatchIdValue(json, "serial", tmpstr.c_str(), target, requestId,
+                       false)) {
+    return;
+  }
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 
   // Target Firmware
   tmpstr = ESP3DSettings::GetFirmwareTargetShortName();

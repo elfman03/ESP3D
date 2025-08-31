@@ -71,6 +71,10 @@ void HTTP_Server::init_handlers() {
   // MKS_SERIAL
   _webserver->on("/upload", HTTP_ANY, handleMKSUpload, MKSFileupload);
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+  // CHITU_SERIAL
+  _webserver->on("/upload", HTTP_ANY, handleChituUpload, ChituFileupload);
+#endif  // COMMUNICATION_PROTOCOL == Chitu_SERIAL
 #ifdef SD_DEVICE
   // SD
   _webserver->on("/sdfiles", HTTP_ANY, handleSDFileList, SDFileupload);

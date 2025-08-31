@@ -111,6 +111,9 @@
 #if COMMUNICATION_PROTOCOL == MKS_SERIAL
 #define DEFAULT_OUTPUT_CLIENT  STRING(ESP3DClientType::mks_serial);
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+#define DEFAULT_OUTPUT_CLIENT  STRING(ESP3DClientType::chitu_serial);
+#endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if COMMUNICATION_PROTOCOL == SOCKET_SERIAL
 #define DEFAULT_OUTPUT_CLIENT STRING(ESP3DClientType::socket_serial);
 #endif
@@ -291,13 +294,13 @@ bool ESP3DSettings::begin() {
 }
 
 bool ESP3DSettings::isVerboseBoot(bool fromsettings) {
-#if COMMUNICATION_PROTOCOL != MKS_SERIAL
+#if (COMMUNICATION_PROTOCOL != MKS_SERIAL) && (COMMUNICATION_PROTOCOL != CHITU_SERIAL)
   if (fromsettings) {
     _isverboseboot = readByte(ESP_VERBOSE_BOOT);
   }
 #else
   _isverboseboot = false;
-#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL
+#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL && COMMUNICATION_PROTOCOL != CHITU_SERIAL
   return _isverboseboot;
 }
 
@@ -884,7 +887,7 @@ bool ESP3DSettings::isValidIntegerSetting(uint32_t value,
     return false;
   }
   switch (settingElement) {
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if defined(USB_SERIAL_FEATURE)
     case ESP_USB_SERIAL_BAUD_RATE:
       for (uint8_t i = 0; i < SupportedUsbSerialBaudListSize; i++) {
@@ -903,7 +906,7 @@ bool ESP3DSettings::isValidIntegerSetting(uint32_t value,
       }
       break;
 #endif  // #if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
     case ESP_WEBDAV_PORT:
     case ESP_HTTP_PORT:
     case ESP_TELNET_PORT:

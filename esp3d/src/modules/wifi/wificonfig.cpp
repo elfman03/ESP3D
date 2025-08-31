@@ -91,13 +91,13 @@ bool WiFiConfig::ConnectSTA2AP() {
   uint8_t dot = 0;
   wl_status_t status = WiFi.status();
   esp3d_log("Connecting");
-#if COMMUNICATION_PROTOCOL != MKS_SERIAL
+#if (COMMUNICATION_PROTOCOL != MKS_SERIAL) && (COMMUNICATION_PROTOCOL != CHITU_SERIAL)
   if (!ESP3DSettings::isVerboseBoot()) {
     esp3d_commands.dispatch("Connecting", ESP3DClientType::all_clients, no_id,
                             ESP3DMessageType::unique, ESP3DClientType::system,
                             ESP3DAuthenticationLevel::admin);
   }
-#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL
+#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   while (status != WL_CONNECTED && count < 40) {
     switch (status) {
       case WL_NO_SSID_AVAIL:

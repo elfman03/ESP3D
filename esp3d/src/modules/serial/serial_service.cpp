@@ -19,7 +19,7 @@
 */
 #include "../../include/esp3d_config.h"
 #if COMMUNICATION_PROTOCOL == RAW_SERIAL || \
-    defined(ESP_SERIAL_BRIDGE_OUTPUT) || COMMUNICATION_PROTOCOL == MKS_SERIAL
+    defined(ESP_SERIAL_BRIDGE_OUTPUT) || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #include "../../core/esp3d_commands.h"
 #include "../../core/esp3d_settings.h"
 #include "../../core/esp3d_string.h"
@@ -37,7 +37,7 @@ ESP3DSerialService serial_bridge_service = ESP3DSerialService(BRIDGE_SERIAL);
 
 const uint32_t SupportedBaudList[] = {9600,    19200,   38400,  57600,  74880,
                                       115200,  230400,  250000, 500000, 921600,
-                                      1000000, 1958400, 2000000};
+                                      1000000, 1958400, 2000000, 2250000};
 const size_t SupportedBaudListSize =
     sizeof(SupportedBaudList) / sizeof(uint32_t);
 

@@ -333,7 +333,7 @@ void ESP3DCommands::ESP400(int cmd_params_pos, ESP3DMessage* msg) {
                   "session timeout", nullptr, nullptr, 255, 0, -1, -1, nullptr,
                   true, target, requestId);
 
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
   // Secure Serial
   dispatchSetting(json, "security/security", ESP_SECURE_SERIAL, "serial",
                   YesNoValues, YesNoLabels, sizeof(YesNoValues) / sizeof(char*),
@@ -518,7 +518,7 @@ void ESP3DCommands::ESP400(int cmd_params_pos, ESP3DMessage* msg) {
                   sizeof(FirmwareValues) / sizeof(char*), -1, -1, -1, nullptr,
                   true, target, requestId);
 #endif  // FIXED_FW_TARGET
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if defined(USB_SERIAL_FEATURE)
   dispatchSetting(json, "system/system", ESP_OUTPUT_CLIENT, "output",
                   OutputClientsValues, OutputClientsLabels,
@@ -538,7 +538,7 @@ void ESP3DCommands::ESP400(int cmd_params_pos, ESP3DMessage* msg) {
                   sizeof(SupportedBaudListSizeStr) / sizeof(char*), -1, -1, -1,
                   nullptr, true, target, requestId);
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 
   // Start delay
   dispatchSetting(json, "system/boot", ESP_BOOT_DELAY, "bootdelay", nullptr,

@@ -171,6 +171,7 @@ typedef uint ESP3DSettingIndex;
 #define RAW_SERIAL 0
 #define MKS_SERIAL 1
 #define SOCKET_SERIAL 2
+#define CHITU_SERIAL 3
 
 // Display
 #define OLED_I2C_SSD1306_128X64 1

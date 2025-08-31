@@ -217,14 +217,14 @@ void NetConfig::onWiFiEvent(WiFiEvent_t event) {
       }
     } break;
     case WIFI_EVENT_STAMODE_GOT_IP: {
-#if COMMUNICATION_PROTOCOL != MKS_SERIAL
+#if (COMMUNICATION_PROTOCOL != MKS_SERIAL) && (COMMUNICATION_PROTOCOL != CHITU_SERIAL)
 #if defined(ESP_GOT_IP_HOOK) && defined(GCODE_HOST_FEATURE)
       String ipMsg = esp3d_string::expandString(ESP_GOT_IP_HOOK);
       esp3d_log("Got IP, sending hook: %s", ipMsg.c_str());
       esp3d_gcode_host.processScript(ipMsg.c_str(),
                                      ESP3DAuthenticationLevel::admin);
 #endif  // #if defined (ESP_GOT_IP_HOOK) && defined (GCODE_HOST_FEATURE)
-#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL
+#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL && COMMUNICATION_PROTOCOL != CHITU_SERIAL
     } break;
     case WIFI_EVENT_SOFTAPMODE_STACONNECTED: {
       esp3d_commands.dispatch("New client", ESP3DClientType::all_clients, no_id,
@@ -268,7 +268,7 @@ void NetConfig::onWiFiEvent(WiFiEvent_t event) {
       esp3d_log("Ethernet lost IP");
       break;
     case ARDUINO_EVENT_ETH_GOT_IP: {
-#if COMMUNICATION_PROTOCOL != MKS_SERIAL
+#if (COMMUNICATION_PROTOCOL != MKS_SERIAL) && (COMMUNICATION_PROTOCOL != CHITU_SERIAL)
 #if defined(ESP_GOT_IP_HOOK) && defined(GCODE_HOST_FEATURE)
       ESP3DHal::wait(500);
       String ipMsg = esp3d_string::expandString(ESP_GOT_IP_HOOK);
@@ -276,7 +276,7 @@ void NetConfig::onWiFiEvent(WiFiEvent_t event) {
       esp3d_gcode_host.processScript(ipMsg.c_str(),
                                      ESP3DAuthenticationLevel::admin);
 #endif  // #if defined (ESP_GOT_IP_HOOK) && defined (GCODE_HOST_FEATURE)
-#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL
+#endif  // #if COMMUNICATION_PROTOCOL == MKS_SERIAL && COMMUNICATION_PROTOCOL != CHITU_SERIAL
       EthConfig::setConnected(true);
     } break;
 

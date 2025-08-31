@@ -157,12 +157,12 @@ void ESP3DCommands::ESP401(int cmd_params_pos, ESP3DMessage* msg) {
         case ESP_TARGET_FW:
           ESP3DSettings::GetFirmwareTarget(true);
           break;
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
         case ESP_SECURE_SERIAL:
           esp3d_serial_service.setParameters();
           break;
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #ifdef AUTHENTICATION_FEATURE
         case ESP_SESSION_TIMEOUT:
           AuthenticationService::setSessionTimeout(1000 * 60 * sval.toInt());
@@ -203,12 +203,12 @@ void ESP3DCommands::ESP401(int cmd_params_pos, ESP3DMessage* msg) {
           esp3d_sensor.setInterval(sval.toInt());
           break;
 #endif  // SENSOR_DEVICE
-#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL
+#if COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL == MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
         case ESP_BAUD_RATE:
           esp3d_serial_service.updateBaudRate(sval.toInt());
           break;
 #endif  // COMMUNICATION_PROTOCOL == RAW_SERIAL || COMMUNICATION_PROTOCOL ==
-        // MKS_SERIAL
+        // MKS_SERIAL || COMMUNICATION_PROTOCOL == CHITU_SERIAL
 #if defined(ESP_SERIAL_BRIDGE_OUTPUT)
         case ESP_SERIAL_BRIDGE_BAUD:
           serial_bridge_service.updateBaudRate(sval.toInt());
