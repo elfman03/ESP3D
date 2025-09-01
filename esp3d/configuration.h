@@ -66,6 +66,7 @@
  * printers and TFT, it encapsulated data in a custom protocol
  */
 #define COMMUNICATION_PROTOCOL CHITU_SERIAL
+#define LOGMAGIC_FEATURE 1
 
 /* Main Serial port / Ouptut 
  * which serial ESP use to communicate to printer (ESP32 has 3 serials

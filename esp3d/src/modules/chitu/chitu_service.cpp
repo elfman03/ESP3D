@@ -28,6 +28,7 @@
 #include "../serial/serial_service.h"
 #include "../telnet/telnet_server.h"
 #include "../wifi/wificonfig.h"
+#include "../logmagic/logmagic_server.h"
 #include "chitu_service.h"
 
 // Flag Pins
@@ -109,6 +110,9 @@ bool ChituService::isHead(const char c) { return (c == CHITU_FRAME_HEAD_FLAG); }
 bool ChituService::isTail(const char c) { return (c == CHITU_FRAME_TAIL_FLAG); }
 bool ChituService::isCommand(const char c) { return (c == CHITU_TYPE_TRANSFER); }
 bool ChituService::isFrame(const char c) {
+  char ctmp[128];
+  sprintf(ctmp,"isFrame -%c-\n",c);
+  LOGMAGIC(ctmp,false);
   if ((c >= CHITU_TYPE_NET) && (c <= CHITU_TYPE_WIFI_CTRL)) {
     return true;
   }
@@ -130,14 +134,16 @@ bool ChituService::dispatch(ESP3DMessage *message) {
 
 bool ChituService::begin() {
   // setup the pins
-  pinMode(BOARD_FLAG_PIN, INPUT);
-  pinMode(ESP_FLAG_PIN, OUTPUT);
+  //pinMode(BOARD_FLAG_PIN, INPUT);
+  //pinMode(ESP_FLAG_PIN, OUTPUT);
   _started = true;
   // max size is 21
   sprintf(_moduleId, "HJNLM000%02X%02X%02X%02X%02X%02X", WiFi.macAddress()[0],
           WiFi.macAddress()[1], WiFi.macAddress()[2], WiFi.macAddress()[3],
           WiFi.macAddress()[4], WiFi.macAddress()[5]);
   commandMode(true);
+  LOGMAGIC("0123456789",5,false);
+  LOGMAGIC("-- should have seen 01234 --- LOGMAGIC FROM CHITU",false);
   return true;
 }
 
@@ -146,11 +152,13 @@ void ChituService::commandMode(bool fromSettings) {
     _commandBaudRate = ESP3DSettings::readUint32(ESP_BAUD_RATE);
   }
   esp3d_log("Cmd Mode");
+  LOGMAGIC("CHITU -- Cmd Mode\n",false);
   _uploadMode = false;
   esp3d_serial_service.updateBaudRate(_commandBaudRate);
 }
 void ChituService::uploadMode() {
   esp3d_log("Upload Mode");
+  LOGMAGIC("CHITU -- Upload Mode\n",false);
   _uploadMode = true;
   esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
 }
@@ -325,7 +333,10 @@ void ChituService::sendWifiHotspots() {
 
 void ChituService::handleFrame(const uint8_t type, const uint8_t *dataFrame,
                              const size_t dataSize) {
+  char ctmp[128];
   esp3d_log("Command is %d", type);
+  sprintf(ctmp,"CHITU - Command is %d\n",type);
+  LOGMAGIC(ctmp,false);
   switch (type) {
     // wifi setup
     case CHITU_TYPE_NET:
@@ -502,6 +513,11 @@ void ChituService::messageWiFiConfig(const uint8_t *dataFrame,
 }
 
 bool ChituService::canSendFrame() {
+  //
+  // CLE dummy
+  //
+  return false;
+
   esp3d_log("Is board ready for frame?");
   digitalWrite(ESP_FLAG_PIN, BOARD_READY_FLAG_VALUE);
   uint32_t startTime = millis();
@@ -517,10 +533,18 @@ bool ChituService::canSendFrame() {
 }
 
 void ChituService::sendFrameDone() {
+  // CLE dummy
+  return;
+
   digitalWrite(ESP_FLAG_PIN, !BOARD_READY_FLAG_VALUE);
 }
 
 bool ChituService::sendGcodeFrame(const char *cmd) {
+  // CLE dummy
+  sendFrameDone();
+  return true;
+
+
   if (_uploadMode) {
     return false;
   }
@@ -564,6 +588,11 @@ bool ChituService::sendNetworkFrame() {
   size_t dataOffset = 0;
   String s;
   static uint32_t lastsend = 0;
+
+  // CLE DUMMY
+  sendFrameDone();
+  return true;
+
   if (_uploadMode) {
     return false;
   }

@@ -25,6 +25,9 @@
 #include "../../core/esp3d_string.h"
 #include "serial_service.h"
 
+#ifdef LOGMAGIC_FEATURE
+#include "../logmagic/logmagic_server.h"
+#endif  // LOGMAGIC_FEATURE
 #if COMMUNICATION_PROTOCOL == MKS_SERIAL
 #include "../mks/mks_service.h"
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
@@ -254,6 +257,7 @@ void ESP3DSerialService::push2buffer(uint8_t *sbuf, size_t len) {
   static int16_t framePos = -1;
   // currently received
   static uint datalen = 0;
+  LOGMAGIC((const char*)sbuf,len,false);
   for (size_t i = 0; i < len; i++) {
     esp3d_log("Data : %c %x", sbuf[i], sbuf[i]);
     framePos++;

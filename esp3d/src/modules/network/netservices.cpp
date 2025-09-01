@@ -47,6 +47,9 @@
 #ifdef TELNET_FEATURE
 #include "../telnet/telnet_server.h"
 #endif  // TELNET_FEATURE
+#ifdef LOGMAGIC_FEATURE
+#include "../logmagic/logmagic_server.h"
+#endif  // LOGMAGIC_FEATURE
 #ifdef FTP_FEATURE
 #include "../ftp/FtpServer.h"
 #endif  // FP_FEATURE
@@ -261,6 +264,27 @@ bool NetServices::begin() {
     }
   }
 #endif  // TELNET_FEATURE
+#ifdef LOGMAGIC_FEATURE
+  if (!logmagic_server.begin()) {
+    res = false;
+    esp3d_log_e("Logmagic server failed");
+    esp3d_commands.dispatch("Logmagic server failed",
+                            ESP3DClientType::all_clients, no_id,
+                            ESP3DMessageType::unique, ESP3DClientType::system,
+                            ESP3DAuthenticationLevel::admin);
+  } else {
+    if (logmagic_server.started()) {
+      String stmp =
+          "Logmagic server started port " + String(logmagic_server.port());
+      if (ESP3DSettings::isVerboseBoot()) {
+        esp3d_commands.dispatch(stmp.c_str(), ESP3DClientType::all_clients,
+                                no_id, ESP3DMessageType::unique,
+                                ESP3DClientType::system,
+                                ESP3DAuthenticationLevel::admin);
+      }
+    }
+  }
+#endif  // LOGMAGIC_FEATURE
 #ifdef FTP_FEATURE
   if (!ftp_server.begin()) {
     res = false;
@@ -455,6 +479,9 @@ void NetServices::end() {
 #ifdef TELNET_FEATURE
   telnet_server.end();
 #endif  // TELNET_FEATURE
+#ifdef LOGMAGIC_FEATURE
+  logmagic_server.end();
+#endif  // LOGMAGIC_FEATURE
 #ifdef FTP_FEATURE
   ftp_server.end();
 #endif  // FTP_FEATURE
@@ -494,6 +521,9 @@ void NetServices::handle() {
 #ifdef TELNET_FEATURE
     telnet_server.handle();
 #endif  // TELNET_FEATURE
+#ifdef LOGMAGIC_FEATURE
+    logmagic_server.handle();
+#endif  // LOGMAGIC_FEATURE
 #ifdef FTP_FEATURE
     ftp_server.handle();
 #endif  // FTP_FEATURE

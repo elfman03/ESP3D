@@ -44,6 +44,7 @@ enum class ESP3DClientType : uint8_t {
   mks_serial = 14,
   lua_script = 15,
   chitu_serial = 16,
+  logmagic = 17,
   command,  // origin only
   system,   // origin only
   all_clients
