@@ -424,7 +424,7 @@
 /* Enable OTA
  * Over The Air Update (OTA)
  */
-// #define OTA_FEATURE
+#define OTA_FEATURE
 
 /* Enable Web Update
  * Update firmware using WebUI, need 4MB of flash

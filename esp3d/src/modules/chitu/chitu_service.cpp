@@ -28,7 +28,9 @@
 #include "../serial/serial_service.h"
 #include "../telnet/telnet_server.h"
 #include "../wifi/wificonfig.h"
+#ifdef LOGMAGIC_FEATURE
 #include "../logmagic/logmagic_server.h"
+#endif // LOGMAGIC_FEATURE
 #include "chitu_service.h"
 
 // Flag Pins
@@ -97,13 +99,14 @@
 #define ACK_TIMEOUT 5000
 #define NET_FRAME_REFRESH_TIME 10000
 
-#define UPLOAD_BAUD_RATE 1958400
+#define CHITU_INIT_BAUD_RATE 115200
+#define CHITU_POSTINIT_BAUD_RATE 2250000
 
 bool ChituService::_started = false;
 uint8_t ChituService::_frame[CHITU_FRAME_SIZE] = {0};
 char ChituService::_moduleId[22] = {0};
 uint8_t ChituService::_uploadStatus = UNKNOW_STATE;
-long ChituService::_commandBaudRate = 115200;
+//long ChituService::_commandBaudRate = 2250000;
 bool ChituService::_uploadMode = false;
 
 bool ChituService::isHead(const char c) { return (c == CHITU_FRAME_HEAD_FLAG); }
@@ -141,26 +144,41 @@ bool ChituService::begin() {
   sprintf(_moduleId, "HJNLM000%02X%02X%02X%02X%02X%02X", WiFi.macAddress()[0],
           WiFi.macAddress()[1], WiFi.macAddress()[2], WiFi.macAddress()[3],
           WiFi.macAddress()[4], WiFi.macAddress()[5]);
+  //
+  // Analysis indicates that this payload is sent by an official Chitu ESP01 (Qidi X-Plus)
+  // https://github.com/elfman03/ChituAnalyzer
+  // The chitu will send a AT+UART_CUR=2250000,8,1,0,0 but because we already send 
+  // the OK for that command here, we should not need to look for that...
+  //
+  esp3d_serial_service.updateBaudRate(CHITU_INIT_BAUD_RATE);
+  const char *ctmp="\r\n;auth ok 2\r\n\r\nready\r\n;CONNECT,4\r\n\r\nOK\r\n";
+  if(esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp)) == strlen(ctmp)) {
+    esp3d_serial_service.flush();
+    esp3d_log("ChituService Begin Message Sent");
+    LOGMAGIC("ChituService Begin Message Sent",false);
+  } else {
+    esp3d_log("ChituService Begin Message Failure");
+    LOGMAGIC("ChituService Begin Message Failure",false);
+    return false;
+  }
   commandMode(true);
-  LOGMAGIC("0123456789",5,false);
-  LOGMAGIC("-- should have seen 01234 --- LOGMAGIC FROM CHITU",false);
   return true;
 }
 
 void ChituService::commandMode(bool fromSettings) {
-  if (fromSettings) {
-    _commandBaudRate = ESP3DSettings::readUint32(ESP_BAUD_RATE);
-  }
+  //if (fromSettings) {
+  //  _commandBaudRate = ESP3DSettings::readUint32(ESP_BAUD_RATE);
+  //}
   esp3d_log("Cmd Mode");
   LOGMAGIC("CHITU -- Cmd Mode\n",false);
   _uploadMode = false;
-  esp3d_serial_service.updateBaudRate(_commandBaudRate);
+  //esp3d_serial_service.updateBaudRate(CHITU_POSTINIT_BAUD_RATE);
 }
 void ChituService::uploadMode() {
   esp3d_log("Upload Mode");
   LOGMAGIC("CHITU -- Upload Mode\n",false);
   _uploadMode = true;
-  esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
+  //esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
 }
 
 uint ChituService::getFragmentID(uint32_t fragmentNumber, bool isLast) {
