@@ -32,14 +32,13 @@ class ChituService {
   static bool dispatch(ESP3DMessage* message);
   static bool sendGcodeFrame(const char* cmd);
   static void handle();
-  static void handleFrame(const uint8_t type, const uint8_t* dataFrame,
-                          const size_t dataSize);
+  static void handleChituMessage(const char* msg, size_t len);
   static void end();
   static bool started() { return _started; }
-  static bool isHead(const char c);
-  static bool isTail(const char c);
-  static bool isFrame(const char c);
-  static bool isCommand(const char c);
+  //static bool isHead(const char c);
+  //static bool isTail(const char c);
+  //static bool isFrame(const char c);
+  //static bool isCommand(const char c);
   static bool sendFirstFragment(const char* filename, size_t filesize);
   static bool sendFragment(const uint8_t* dataFrame, const size_t dataSize,
                            uint fragmentID);

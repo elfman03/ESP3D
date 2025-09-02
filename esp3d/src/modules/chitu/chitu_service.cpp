@@ -109,20 +109,31 @@ uint8_t ChituService::_uploadStatus = UNKNOW_STATE;
 //long ChituService::_commandBaudRate = 2250000;
 bool ChituService::_uploadMode = false;
 
-bool ChituService::isHead(const char c) { return (c == CHITU_FRAME_HEAD_FLAG); }
-bool ChituService::isTail(const char c) { return (c == CHITU_FRAME_TAIL_FLAG); }
-bool ChituService::isCommand(const char c) { return (c == CHITU_TYPE_TRANSFER); }
-bool ChituService::isFrame(const char c) {
-  char ctmp[128];
-  sprintf(ctmp,"isFrame -%c-\n",c);
-  LOGMAGIC(ctmp,false);
-  if ((c >= CHITU_TYPE_NET) && (c <= CHITU_TYPE_WIFI_CTRL)) {
-    return true;
-  }
-  return false;
-}
+//bool ChituService::isHead(const char c) { return (c == CHITU_FRAME_HEAD_FLAG); }
+//bool ChituService::isTail(const char c) { return (c == CHITU_FRAME_TAIL_FLAG); }
+//bool ChituService::isCommand(const char c) { return (c == CHITU_TYPE_TRANSFER); }
+//bool ChituService::isFrame(const char c) {
+//  char ctmp[128];
+//  sprintf(ctmp,"isFrame -%c-\n",c);
+//  LOGMAGIC(ctmp,false);
+//  if ((c >= CHITU_TYPE_NET) && (c <= CHITU_TYPE_WIFI_CTRL)) {
+//    return true;
+//  }
+//  return false;
+//}
 
 bool ChituService::dispatch(ESP3DMessage *message) {
+  char ctmp[128];
+  if(message->origin==ESP3DClientType::serial) {
+    sprintf(ctmp,"chitu dispatch: origin=serial: ");
+  } else {
+    sprintf(ctmp,"chitu dispatch: origin=%d: ",message->origin);
+  }
+  LOGMAGIC(ctmp);
+  LOGMAGIC((const char*)message->data,message->size);
+  LOGMAGIC("\r\n");
+  esp3d_message_manager.deleteMsg(message);
+  return true;
   if (!message || !_started) {
     return false;
   }
@@ -155,10 +166,10 @@ bool ChituService::begin() {
   if(esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp)) == strlen(ctmp)) {
     esp3d_serial_service.flush();
     esp3d_log("ChituService Begin Message Sent");
-    LOGMAGIC("ChituService Begin Message Sent",false);
+    LOGMAGIC("ChituService Begin Message Sent");
   } else {
     esp3d_log("ChituService Begin Message Failure");
-    LOGMAGIC("ChituService Begin Message Failure",false);
+    LOGMAGIC("ChituService Begin Message Failure");
     return false;
   }
   commandMode(true);
@@ -170,13 +181,13 @@ void ChituService::commandMode(bool fromSettings) {
   //  _commandBaudRate = ESP3DSettings::readUint32(ESP_BAUD_RATE);
   //}
   esp3d_log("Cmd Mode");
-  LOGMAGIC("CHITU -- Cmd Mode\n",false);
+  LOGMAGIC("CHITU -- Cmd Mode\r\n");
   _uploadMode = false;
   //esp3d_serial_service.updateBaudRate(CHITU_POSTINIT_BAUD_RATE);
 }
 void ChituService::uploadMode() {
   esp3d_log("Upload Mode");
-  LOGMAGIC("CHITU -- Upload Mode\n",false);
+  LOGMAGIC("CHITU -- Upload Mode\r\n");
   _uploadMode = true;
   //esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
 }
@@ -349,12 +360,13 @@ void ChituService::sendWifiHotspots() {
   sendFrameDone();
 }
 
-void ChituService::handleFrame(const uint8_t type, const uint8_t *dataFrame,
-                             const size_t dataSize) {
-  char ctmp[128];
+void ChituService::handleChituMessage(const char *msg, size_t len) {
   esp3d_log("Command is %d", type);
-  sprintf(ctmp,"CHITU - Command is %d\n",type);
-  LOGMAGIC(ctmp,false);
+  LOGMAGIC("CHITU Command: ");
+  LOGMAGIC(msg,len);
+  LOGMAGIC("\n");
+  return;
+/*
   switch (type) {
     // wifi setup
     case CHITU_TYPE_NET:
@@ -406,6 +418,7 @@ void ChituService::handleFrame(const uint8_t type, const uint8_t *dataFrame,
     default:
       esp3d_log_e("Unknow type");
   }
+*/
 }
 
 void ChituService::messageWiFiControl(const uint8_t *dataFrame,

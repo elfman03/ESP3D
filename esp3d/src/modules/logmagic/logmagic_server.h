@@ -44,35 +44,20 @@ class LogMagic_Server {
   bool reset();
   bool started();
   bool isConnected();
-  const char* clientIPAddress();
   size_t writeBytes(const uint8_t* buffer, size_t size);
-  size_t post(const char *str, bool isFinal);
-  size_t post(const char *buf, size_t size, bool isFinal);
-  bool dispatch(ESP3DMessage* message);
+  size_t post(const char *str);
+  size_t post(const char *buf, size_t size);
   int available();
   int availableForWrite();
-  void flush();
-  size_t readBytes(uint8_t* sbuf, size_t len);
   uint16_t port() { return _port; }
   void closeClient();
-  void initAuthentication();
-  void setAuthentication(ESP3DAuthenticationLevel auth) { _auth = auth; }
-  ESP3DAuthenticationLevel getAuthentication();
 
  private:
   bool _started;
   WiFiServer* _logmagicserver;
   WiFiClient _logmagicClients;
-  ESP3DAuthenticationLevel _auth;
   uint16_t _port;
-  bool _isdebug;
   uint32_t _lastflush;
-  uint8_t* _buffer;
-  size_t _buffer_size;
-  void push2buffer(uint8_t* sbuf, size_t len);
-  void flushBuffer();
-  void flushChar(char c);
-  void flushData(const uint8_t* data, size_t size, ESP3DMessageType type);
 };
 
 extern LogMagic_Server logmagic_server;

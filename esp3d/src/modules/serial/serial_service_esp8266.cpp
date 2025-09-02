@@ -106,10 +106,19 @@ bool ESP3DSerialService::end() {
 }
 
 void ESP3DSerialService::flushData(const uint8_t *data, size_t size, ESP3DMessageType type) {
+  ESP3DClientType ctype;
+  //
+  // IF we are CHITU_SERIAL indicate that is the destination for serial packets
+  //
+#if COMMUNICATION_PROTOCOL == CHITU_SERIAL
+  ctype = ESP3DClientType::chitu_serial;
+#else
+  (_id == MAIN_SERIAL) ? ctype=ESP3DClientType::all_clients
+                       : ctype=esp3d_commands.getOutputClient();
+#endif
   ESP3DMessage *message = esp3d_message_manager.newMsg(
       _origin,
-      _id == MAIN_SERIAL ? ESP3DClientType::all_clients
-                         : esp3d_commands.getOutputClient(),
+      ctype,
       data, size, getAuthentication());
 
   if (message) {
@@ -234,100 +243,6 @@ void ESP3DSerialService::push2buffer(uint8_t *sbuf, size_t len) {
     } else {
       // frame is not started let see if it is a head
       if (MKSService::isHead(char(sbuf[i]))) {
-        esp3d_log("got head");
-        // yes it is
-        isFrameStarted = true;
-        framePos = 0;
-        _buffer_size = 0;
-      } else {
-        // no so let reset all and just ignore it
-        // TODO should we handle these data ?
-        esp3d_log_e("Unidentified data : %c %x", sbuf[i], sbuf[i]);
-        isCommandFrame = false;
-        framePos = -1;
-        datalen = 0;
-      }
-    }
-  }
-#elif COMMUNICATION_PROTOCOL == CHITU_SERIAL
-  static bool isFrameStarted = false;
-  static bool isCommandFrame = false;
-  static uint8_t type;
-  // expected size
-  static int16_t framePos = -1;
-  // currently received
-  static uint datalen = 0;
-  LOGMAGIC((const char*)sbuf,len,false);
-  for (size_t i = 0; i < len; i++) {
-    esp3d_log("Data : %c %x", sbuf[i], sbuf[i]);
-    framePos++;
-    _lastflush = millis();
-    // so frame head was detected
-    if (isFrameStarted) {
-      // checking it is a valid Frame header
-      if (framePos == 1) {
-        esp3d_log("type = %x", sbuf[i]);
-        if (ChituService::isFrame(char(sbuf[i]))) {
-          if (ChituService::isCommand(char(sbuf[i]))) {
-            isCommandFrame = true;
-            esp3d_log("type: Command");
-          } else {
-            esp3d_log("type: other");
-            type = sbuf[i];
-            isCommandFrame = false;
-          }
-        } else {
-          esp3d_log_e("wrong frame type");
-          isFrameStarted = false;
-          _buffer_size = 0;
-        }
-      } else if ((framePos == 2) || (framePos == 3)) {
-        // add size to int
-        if (framePos == 2) {
-          datalen = sbuf[i];
-        } else {
-          datalen += (sbuf[i] << 8);
-          esp3d_log("Data len: %d", datalen);
-          if (datalen > (ESP3D_SERIAL_BUFFER_SIZE - 5)) {
-            esp3d_log_e("Overflow in data len");
-            isFrameStarted = false;
-            _buffer_size = 0;
-          }
-        }
-      } else if (ChituService::isTail(char(sbuf[i]))) {
-        esp3d_log("got tail");
-        _buffer[_buffer_size] = '\0';
-        esp3d_log("size is %d", _buffer_size);
-        // let check integrity
-        if (_buffer_size == datalen) {
-          esp3d_log("Flushing buffer");
-          if (isCommandFrame) {
-            flushBuffer();
-          } else {
-            ChituService::handleFrame(type, (const uint8_t *)_buffer,
-                                    _buffer_size);
-          }
-        } else {
-          esp3d_log_e("Error in data len");
-        }
-        // clear frame infos
-        _buffer_size = 0;
-        isFrameStarted = false;
-
-      } else {
-        // it is data
-        if (_buffer_size < ESP3D_SERIAL_BUFFER_SIZE - 5) {
-          _buffer[_buffer_size] = sbuf[i];
-          _buffer_size++;
-        } else {
-          esp3d_log_e("Overflow in data len");
-          isFrameStarted = false;
-          _buffer_size = 0;
-        }
-      }
-    } else {
-      // frame is not started let see if it is a head
-      if (ChituService::isHead(char(sbuf[i]))) {
         esp3d_log("got head");
         // yes it is
         isFrameStarted = true;

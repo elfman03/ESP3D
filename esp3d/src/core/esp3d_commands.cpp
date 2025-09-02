@@ -63,10 +63,6 @@ const char *esp3dmsgstr[] = {"head", "core", "tail", "unique"};
 #include "../modules/telnet/telnet_server.h"
 #endif  // TELNET_FEATURE
 
-#if defined(LOGMAGIC_FEATURE)
-#include "../modules/logmagic/logmagic_server.h"
-#endif  // LOGMAGIC_FEATURE
-
 #if defined(HTTP_FEATURE) || defined(WS_DATA_FEATURE)
 #include "../modules/websocket/websocket_server.h"
 #endif  // HTTP_FEATURE || WS_DATA_FEATURE
@@ -378,11 +374,6 @@ void ESP3DCommands::execute_internal_command(int cmd, int cmd_params_pos,
         telnet_server.setAuthentication(msg->authentication_level);
         break;
 #endif  // TELNET_FEATURE
-#if defined(LOGMAGIC_FEATURE)
-      case ESP3DClientType::logmagic:
-        logmagic_server.setAuthentication(msg->authentication_level);
-        break;
-#endif  // LOGMAGIC_FEATURE
 #if defined(WS_DATA_FEATURE)
       case ESP3DClientType::websocket:
         websocket_data_server.setAuthentication(msg->authentication_level);
@@ -1424,16 +1415,6 @@ bool ESP3DCommands::dispatch(ESP3DMessage *msg) {
       break;
 #endif  // TELNET_FEATURE
 
-#ifdef LOGMAGIC_FEATURE
-    case ESP3DClientType::logmagic:
-      esp3d_log("Logmagic message");
-      if (!logmagic_server.dispatch(msg)) {
-        sendOk = false;
-        esp3d_log_e("Logmagic dispatch failed");
-      }
-      break;
-#endif  // LOGMAGIC_FEATURE
-
 #ifdef BLUETOOTH_FEATURE
     case ESP3DClientType::bluetooth:
       esp3d_log("Bluetooth message");
@@ -1688,28 +1669,6 @@ bool ESP3DCommands::dispatch(ESP3DMessage *msg) {
           esp3d_log("Telnet not connected");
       }
 #endif  // TELNET_FEATURE
-
-#ifdef LOGMAGIC_FEATURE
-      if (msg->origin != ESP3DClientType::logmagic &&
-          logmagic_server.isConnected()) {
-        if (msg->target == ESP3DClientType::all_clients) {
-          // become the reference message
-          msg->target = ESP3DClientType::logmagic;
-        } else {
-          // duplicate message because current is  already pending
-          ESP3DMessage *copy_msg = esp3d_message_manager.copyMsg(*msg);
-          if (copy_msg) {
-            copy_msg->target = ESP3DClientType::logmagic;
-            dispatch(copy_msg);
-          } else {
-            esp3d_log_e("Cannot duplicate message for logmagic");
-          }
-        }
-      } else {
-        if (msg->origin != ESP3DClientType::logmagic)
-          esp3d_log("Logmagic not connected");
-      }
-#endif  // LOGMAGIC_FEATURE
 
 #ifdef HTTP_FEATURE  // http cannot be in all client because it depend of any
                      // connection of the server

@@ -20,9 +20,7 @@
 
 #include "../../include/esp3d_config.h"
 
-#if defined(LOGMAGIC_FEATURE) || \
-    (defined(ESP_LOG_FEATURE) && ESP_LOG_FEATURE == LOG_OUTPUT_LOGMAGIC)
-
+#if defined(LOGMAGIC_FEATURE) 
 
 #include "../../core/esp3d_commands.h"
 #include "../../core/esp3d_message.h"
@@ -57,8 +55,7 @@ bool LogMagic_Server::isConnected() {
       _logmagicClients = _logmagicserver->accept();
   #ifndef DISABLE_LOGMAGIC_WELCOME_MESSAGE
       // new client
-      writeBytes((uint8_t *)LOGMAGIC_WELCOME_MESSAGE,
-                 strlen(LOGMAGIC_WELCOME_MESSAGE));
+      writeBytes((uint8_t *)LOGMAGIC_WELCOME_MESSAGE, strlen(LOGMAGIC_WELCOME_MESSAGE));
   #endif  // DISABLE_LOGMAGIC_WELCOME_MESSAGE
     }
   }
@@ -69,23 +66,10 @@ bool LogMagic_Server::isConnected() {
   return _logmagicClients.connected();
 }
 
-const char *LogMagic_Server::clientIPAddress() {
-  static String res;
-  res = "0.0.0.0";
-  if (_logmagicClients && _logmagicClients.connected()) {
-    res = _logmagicClients.remoteIP().toString();
-  }
-  return res.c_str();
-}
-
 LogMagic_Server::LogMagic_Server() {
-  _buffer_size = 0;
   _started = false;
-  _isdebug = false;
   _port = 0;
-  _buffer = nullptr;
   _logmagicserver = nullptr;
-  initAuthentication();
 }
 LogMagic_Server::~LogMagic_Server() { end(); }
 
@@ -94,22 +78,12 @@ LogMagic_Server::~LogMagic_Server() { end(); }
  */
 bool LogMagic_Server::begin(uint16_t port, bool debug) {
   end();
-  //if (ESP3DSettings::readByte(ESP_LOGMAGIC_ON) != 1) {
-  //  return true;
-  //}
   // Get logmagic port
   if (port == 0) {
     // 8023
     _port = 8000+ESP3DSettings::readUint32(ESP_TELNET_PORT);
   } else {
     _port = port;
-  }
-  _isdebug = debug;
-  if (!_isdebug) {
-    _buffer = (uint8_t *)malloc(ESP3D_LOGMAGIC_BUFFER_SIZE + 1);
-    if (!_buffer) {
-      return false;
-    }
   }
   // create instance
   _logmagicserver = new WiFiServer(_port);
@@ -120,7 +94,6 @@ bool LogMagic_Server::begin(uint16_t port, bool debug) {
   // start logmagic server
   _logmagicserver->begin();
   _started = true;
-  _lastflush = millis();
   return _started;
 }
 /**
@@ -128,24 +101,12 @@ bool LogMagic_Server::begin(uint16_t port, bool debug) {
  */
 void LogMagic_Server::end() {
   _started = false;
-  _buffer_size = 0;
   _port = 0;
-  _isdebug = false;
   closeClient();
   if (_logmagicserver) {
     delete _logmagicserver;
     _logmagicserver = nullptr;
   }
-
-  if (_buffer) {
-    free(_buffer);
-    _buffer = nullptr;
-  }
-#if defined(AUTHENTICATION_FEATURE)
-  _auth = ESP3DAuthenticationLevel::guest;
-#else
-  _auth = ESP3DAuthenticationLevel::admin;
-#endif  // AUTHENTICATION_FEATURE
 }
 
 /**
@@ -168,88 +129,8 @@ void LogMagic_Server::handle() {
       uint8_t *sbuf = (uint8_t *)malloc(len);
       if (sbuf) {
         size_t count = _logmagicClients.read(sbuf, len);
-	// CLE - Comment out because this is a write only channel
-        // push to buffer
-        //if (count > 0) {
-        //  push2buffer(sbuf, count);
-        //}
-        // free buffer
+	// discard.  write only channel
         free(sbuf);
-      }
-    }
-  }
-  // we cannot left data in buffer too long
-  // in case some commands "forget" to add \n
-  if (((millis() - _lastflush) > TIMEOUT_LOGMAGIC_FLUSH) && (_buffer_size > 0)) {
-    flushBuffer();
-  }
-}
-
-bool LogMagic_Server::dispatch(ESP3DMessage *message) {
-  if (!message || !_started) {
-    return false;
-  }
-  if (message->size > 0 && message->data) {
-    size_t sentcnt = writeBytes(message->data, message->size);
-    if (sentcnt != message->size) {
-      return false;
-    }
-    esp3d_message_manager.deleteMsg(message);
-    return true;
-  }
-  return false;
-}
-
-void LogMagic_Server::initAuthentication() {
-#if defined(AUTHENTICATION_FEATURE)
-  _auth = ESP3DAuthenticationLevel::guest;
-#else
-  _auth = ESP3DAuthenticationLevel::admin;
-#endif  // AUTHENTICATION_FEATURE
-}
-ESP3DAuthenticationLevel LogMagic_Server::getAuthentication() { return _auth; }
-
-
-
-void LogMagic_Server::flushData(const uint8_t *data, size_t size, ESP3DMessageType type) {
-  ESP3DMessage *message = esp3d_message_manager.newMsg(
-      ESP3DClientType::logmagic, esp3d_commands.getOutputClient(), data,
-      size, _auth);
-
-  if (message) {
-    message->type = type;
-    esp3d_log("Process Message");
-    esp3d_commands.process(message);
-  } else {
-    esp3d_log_e("Cannot create message");
-  }
-  _lastflush = millis();
-}
-
-
-void LogMagic_Server::flushChar(char c) { flushData((uint8_t *)&c, 1, ESP3DMessageType::realtimecmd); }
-
-void LogMagic_Server::flushBuffer() {
-  _buffer[_buffer_size] = 0x0;
-  flushData((uint8_t *)_buffer, _buffer_size, ESP3DMessageType::unique);
-  _buffer_size = 0;
-}
-
-
-void LogMagic_Server::push2buffer(uint8_t *sbuf, size_t len) {
-  if (!_buffer || !_started) {
-    return;
-  }
-  for (size_t i = 0; i < len; i++) {
-    _lastflush = millis();
-    if (esp3d_string::isRealTimeCommand(sbuf[i])) {
-      flushChar(sbuf[i]);
-    } else {
-      _buffer[_buffer_size] = sbuf[i];
-      _buffer_size++;
-      if (_buffer_size > ESP3D_LOGMAGIC_BUFFER_SIZE ||
-          _buffer[_buffer_size - 1] == '\n') {
-        flushBuffer();
       }
     }
   }
@@ -286,16 +167,13 @@ size_t LogMagic_Server::writeBytes(const uint8_t *buffer, size_t size) {
   return 0;
 }
 
-size_t LogMagic_Server::post(const char *buf, size_t size, bool isFinal) {
-   size_t ret=writeBytes((const uint8_t*)buf,size);
-   if(isFinal) { closeClient(); }
-   return ret;
+size_t LogMagic_Server::post(const char *buf, size_t size) {
+   return writeBytes((const uint8_t*)buf,size);
 }
 
-size_t LogMagic_Server::post(const char *str, bool isFinal) {
-   return post(str,strlen(str),isFinal);
+size_t LogMagic_Server::post(const char *str) {
+   return writeBytes((const uint8_t*)str,strlen(str));
 }
-
 
 int LogMagic_Server::availableForWrite() {
   if (!isConnected()) {
@@ -315,16 +193,5 @@ int LogMagic_Server::available() {
   }
   return 0;
 }
-
-size_t LogMagic_Server::readBytes(uint8_t *sbuf, size_t len) {
-  if (isConnected()) {
-    if (_logmagicClients.available() > 0) {
-      return _logmagicClients.read(sbuf, len);
-    }
-  }
-  return 0;
-}
-
-void LogMagic_Server::flush() { _logmagicClients.flush(); }
 
 #endif  // LOGMAGIC_FEATURE
