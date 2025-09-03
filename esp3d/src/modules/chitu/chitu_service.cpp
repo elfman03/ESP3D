@@ -33,128 +33,50 @@
 #endif // LOGMAGIC_FEATURE
 #include "chitu_service.h"
 
-// Flag Pins
-#define ESP_FLAG_PIN 0
-#define BOARD_FLAG_PIN 4
-// Flag pins values
-#define BOARD_READY_FLAG_VALUE LOW
-
-// Frame offsets
-#define CHITU_FRAME_HEAD_OFFSET 0
-#define CHITU_FRAME_TYPE_OFFSET 1
-#define CHITU_FRAME_DATALEN_OFFSET 2
-#define CHITU_FRAME_DATA_OFFSET 4
-
-// Frame flags
-#define CHITU_FRAME_HEAD_FLAG (char)0xa5
-#define CHITU_FRAME_TAIL_FLAG (char)0xfc
-
-// Network states
-#define CHITU_FRAME_NETWORK_OK_STATE (char)0x0a
-#define CHITU_FRAME_NETWORK_FAIL_STATE (char)0x05
-#define CHITU_FRAME_NETWORK_ERROR_STATE (char)0x0e
-
-// Network modes
-#define CHITU_FRAME_NETWORK_AP_MODE (char)0x01
-#define CHITU_FRAME_NETWORK_STA_MODE (char)0x02
-#define CHITU_FRAME_NETWORK_APSTA_MODE (char)0x03
-
-// Cloud states
-#define CHITU_FRAME_CLOUD_BINDED_STATE (char)0x12
-#define CHITU_FRAME_CLOUD_NOT_BINDED_STATE (char)0x13
-#define CHITU_FRAME_CLOUD_DISCONNECTED_STATE (char)0x10
-#define CHITU_FRAME_CLOUD_DISABLED_STATE (char)0x00
-
-// Data types
-#define CHITU_FRAME_DATA_NETWORK_TYPE (char)0x0
-#define CHITU_FRAME_DATA_COMMAND_TYPE (char)0x1
-#define CHITU_FRAME_DATA_FIRST_FRAGMENT_TYPE (char)0x2
-#define CHITU_FRAME_DATA_FRAGMENT_TYPE (char)0x3
-#define CHITU_FRAME_DATA_HOTSPOTS_LIST_TYPE (char)0x4
-#define CHITU_FRAME_DATA_STATIC_IP_TYPE (char)0x5
-
-#define CHITU_TYPE_NET (char)0x0
-#define CHITU_TYPE_PRINTER (char)0x1
-#define CHITU_TYPE_TRANSFER (char)0x2
-#define CHITU_TYPE_EXCEPTION (char)0x3
-#define CHITU_TYPE_CLOUD (char)0x4
-#define CHITU_TYPE_UNBIND (char)0x5
-#define CHITU_TYPE_WID (char)0x6
-#define CHITU_TYPE_SCAN_WIFI (char)0x7
-#define CHITU_TYPE_MANUAL_IP (char)0x8
-#define CHITU_TYPE_WIFI_CTRL (char)0x9
-
-#define CONNECT_STA 0x1
-#define DISCONNECT_STA 0x2
-#define REMOVE_STA_INFO 0x3
-
 #define UNKNOW_STATE 0x0
 #define ERROR_STATE 0x1
 #define SUCCESS_STATE 0x2
-
-#define NB_HOTSPOT_MAX 15
-
-// Timeouts
-#define FRAME_WAIT_TO_SEND_TIMEOUT 2000
-#define ACK_TIMEOUT 5000
-#define NET_FRAME_REFRESH_TIME 10000
 
 #define CHITU_INIT_BAUD_RATE 115200
 #define CHITU_POSTINIT_BAUD_RATE 2250000
 
 bool ChituService::_started = false;
-uint8_t ChituService::_frame[CHITU_FRAME_SIZE] = {0};
-char ChituService::_moduleId[22] = {0};
 uint8_t ChituService::_uploadStatus = UNKNOW_STATE;
-//long ChituService::_commandBaudRate = 2250000;
 bool ChituService::_uploadMode = false;
-
-//bool ChituService::isHead(const char c) { return (c == CHITU_FRAME_HEAD_FLAG); }
-//bool ChituService::isTail(const char c) { return (c == CHITU_FRAME_TAIL_FLAG); }
-//bool ChituService::isCommand(const char c) { return (c == CHITU_TYPE_TRANSFER); }
-//bool ChituService::isFrame(const char c) {
-//  char ctmp[128];
-//  sprintf(ctmp,"isFrame -%c-\n",c);
-//  LOGMAGIC(ctmp,false);
-//  if ((c >= CHITU_TYPE_NET) && (c <= CHITU_TYPE_WIFI_CTRL)) {
-//    return true;
-//  }
-//  return false;
-//}
 
 bool ChituService::dispatch(ESP3DMessage *message) {
   char ctmp[128];
-  if(message->origin==ESP3DClientType::serial) {
-    sprintf(ctmp,"chitu dispatch: origin=serial: ");
-  } else {
-    sprintf(ctmp,"chitu dispatch: origin=%d: ",message->origin);
-  }
-  LOGMAGIC(ctmp);
-  LOGMAGIC((const char*)message->data,message->size);
-  LOGMAGIC("\r\n");
-  esp3d_message_manager.deleteMsg(message);
-  return true;
+  //
+  // sanity to avoid responding when impossible
+  //
   if (!message || !_started) {
     return false;
   }
-  if (message->size > 0 && message->data) {
-    if (sendGcodeFrame((const char *)message->data)) {
-      esp3d_message_manager.deleteMsg(message);
-      return true;
-    }
+  //
+  // If message originates from chitu serial
+  //
+  if(message->origin==ESP3DClientType::serial) {
+    doChituMessage((const char*)message->data,message->size);
+    esp3d_message_manager.deleteMsg(message);
+    return true;
   }
+  if(message->origin==ESP3DClientType::http) {
+    doGcodeMessage((const char*)message->data,message->size);
+    esp3d_message_manager.deleteMsg(message);
+    return true;
+  }
+  //
+  // Message originates from unhandled direction
+  //
+  sprintf(ctmp,"chitu dispatch: origin=%d .. ignore...: ",message->origin);
+  LOGMAGIC(ctmp);
+  LOGMAGIC((const char*)message->data,message->size);
+  LOGMAGIC("\r\n");
   return false;
 }
 
 bool ChituService::begin() {
-  // setup the pins
-  //pinMode(BOARD_FLAG_PIN, INPUT);
-  //pinMode(ESP_FLAG_PIN, OUTPUT);
   _started = true;
-  // max size is 21
-  sprintf(_moduleId, "HJNLM000%02X%02X%02X%02X%02X%02X", WiFi.macAddress()[0],
-          WiFi.macAddress()[1], WiFi.macAddress()[2], WiFi.macAddress()[3],
-          WiFi.macAddress()[4], WiFi.macAddress()[5]);
   //
   // Analysis indicates that this payload is sent by an official Chitu ESP01 (Qidi X-Plus)
   // https://github.com/elfman03/ChituAnalyzer
@@ -164,18 +86,18 @@ bool ChituService::begin() {
   esp3d_serial_service.updateBaudRate(CHITU_INIT_BAUD_RATE);
   const char *ctmp="\r\n;auth ok 2\r\n\r\nready\r\n;CONNECT,4\r\n\r\nOK\r\n";
   if(esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp)) == strlen(ctmp)) {
-    esp3d_serial_service.flush();
     esp3d_log("ChituService Begin Message Sent");
-    LOGMAGIC("ChituService Begin Message Sent");
   } else {
     esp3d_log("ChituService Begin Message Failure");
-    LOGMAGIC("ChituService Begin Message Failure");
     return false;
   }
   commandMode(true);
   return true;
 }
 
+//
+// used by http upload mode
+//
 void ChituService::commandMode(bool fromSettings) {
   //if (fromSettings) {
   //  _commandBaudRate = ESP3DSettings::readUint32(ESP_BAUD_RATE);
@@ -183,8 +105,11 @@ void ChituService::commandMode(bool fromSettings) {
   esp3d_log("Cmd Mode");
   LOGMAGIC("CHITU -- Cmd Mode\r\n");
   _uploadMode = false;
-  //esp3d_serial_service.updateBaudRate(CHITU_POSTINIT_BAUD_RATE);
+  esp3d_serial_service.updateBaudRate(CHITU_POSTINIT_BAUD_RATE);
 }
+//
+// REFACTOR -- used by http upload mode
+//
 void ChituService::uploadMode() {
   esp3d_log("Upload Mode");
   LOGMAGIC("CHITU -- Upload Mode\r\n");
@@ -192,7 +117,11 @@ void ChituService::uploadMode() {
   //esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
 }
 
+//
+// REFACTOR -- used by http upload mode
+//
 uint ChituService::getFragmentID(uint32_t fragmentNumber, bool isLast) {
+  LOGMAGIC("getFragmentID\r\n");
   esp3d_log("Fragment: %d %s", fragmentNumber, isLast ? " is last" : "");
   if (isLast) {
     fragmentNumber |= (1 << 31);
@@ -203,607 +132,152 @@ uint ChituService::getFragmentID(uint32_t fragmentNumber, bool isLast) {
   return fragmentNumber;
 }
 
+//
+// REFACTOR -- used by http upload mode
+//
 bool ChituService::sendFirstFragment(const char *filename, size_t filesize) {
   uint fileNameLen = strlen(filename);
   uint dataLen = fileNameLen + 5;
-  clearFrame();
-  // Head Flag
-  _frame[CHITU_FRAME_HEAD_OFFSET] = CHITU_FRAME_HEAD_FLAG;
-  // Type Flag
-  _frame[CHITU_FRAME_TYPE_OFFSET] = CHITU_FRAME_DATA_FIRST_FRAGMENT_TYPE;
-  // Fragment size
-  _frame[CHITU_FRAME_DATALEN_OFFSET] = dataLen & 0xff;
-  _frame[CHITU_FRAME_DATALEN_OFFSET + 1] = dataLen >> 8;
-  // FileName size
-  _frame[CHITU_FRAME_DATA_OFFSET] = strlen(filename);
-  // File Size
-  _frame[CHITU_FRAME_DATA_OFFSET + 1] = filesize & 0xff;
-  _frame[CHITU_FRAME_DATA_OFFSET + 2] = (filesize >> 8) & 0xff;
-  _frame[CHITU_FRAME_DATA_OFFSET + 3] = (filesize >> 16) & 0xff;
-  _frame[CHITU_FRAME_DATA_OFFSET + 4] = (filesize >> 24) & 0xff;
-  // Filename
-  strncpy((char *)&_frame[CHITU_FRAME_DATA_OFFSET + 5], filename, fileNameLen);
-  // Tail Flag
-  _frame[dataLen + 4] = CHITU_FRAME_TAIL_FLAG;
+  LOGMAGIC("sendFirstFragment\r\n");
   esp3d_log("Filename: %s  Filesize: %d", filename, filesize);
-  for (uint i = 0; i < dataLen + 5; i++) {
-    esp3d_log("%c %x", _frame[i], _frame[i]);
-  }
-  _uploadStatus = UNKNOW_STATE;
-  if (canSendFrame()) {
-    _uploadStatus = UNKNOW_STATE;
-    if (esp3d_serial_service.writeBytes(_frame, dataLen + 5) == (dataLen + 5)) {
-      esp3d_log("First fragment Ok");
-      sendFrameDone();
-      return true;
-    }
-  }
-  esp3d_log("Failed");
-  sendFrameDone();
-  return false;
+  esp3d_log("Ok");
+  return true;
 }
 
+//
+// REFACTOR -- used by http upload mode
+//
 bool ChituService::sendFragment(const uint8_t *dataFrame, const size_t dataSize,
                               uint fragmentID) {
   uint dataLen = dataSize + 4;
   esp3d_log("Fragment datalen:%d", dataSize);
-  // Head Flag
-  _frame[CHITU_FRAME_HEAD_OFFSET] = CHITU_FRAME_HEAD_FLAG;
-  // Type Flag
-  _frame[CHITU_FRAME_TYPE_OFFSET] = CHITU_FRAME_DATA_FRAGMENT_TYPE;
-  // Fragment size
-  _frame[CHITU_FRAME_DATALEN_OFFSET] = dataLen & 0xff;
-  _frame[CHITU_FRAME_DATALEN_OFFSET + 1] = dataLen >> 8;
-  // Fragment ID
-  _frame[CHITU_FRAME_DATA_OFFSET] = fragmentID & 0xff;
-  _frame[CHITU_FRAME_DATA_OFFSET + 1] = (fragmentID >> 8) & 0xff;
-  _frame[CHITU_FRAME_DATA_OFFSET + 2] = (fragmentID >> 16) & 0xff;
-  _frame[CHITU_FRAME_DATA_OFFSET + 3] = (fragmentID >> 24) & 0xff;
-  // data
-  if ((dataSize > 0) && (dataFrame != nullptr)) {
-    memcpy(&_frame[CHITU_FRAME_DATA_OFFSET + 4], dataFrame, dataSize);
-  }
-  if (dataSize < CHITU_FRAME_DATA_MAX_SIZE) {
-    clearFrame(dataLen + 4);
-  }
-  // Tail Flag
-  _frame[dataLen + 4] = CHITU_FRAME_TAIL_FLAG;
-  /* for (uint i =0; i< dataLen + 5 ; i++) {
-           esp3d_log("%c %x",_frame[i],_frame[i]);
-       }*/
-  if (canSendFrame()) {
-    _uploadStatus = UNKNOW_STATE;
-    if (esp3d_serial_service.writeBytes(_frame, CHITU_FRAME_SIZE) ==
-        CHITU_FRAME_SIZE) {
-      esp3d_log("Ok");
-      sendFrameDone();
-      return true;
-    }
-    esp3d_log_e("Error with size sent");
-  }
-  esp3d_log_e("Failed");
-  sendFrameDone();
-  return false;
+  LOGMAGIC("sendFragment\r\n");
+  esp3d_log("Ok");
+  return true;
 }
 
-void ChituService::sendWifiHotspots() {
-  uint8_t ssid_name_length;
-  uint dataOffset = 1;
-  uint8_t total_hotspots = 0;
-  uint8_t currentmode = WiFi.getMode();
-  if (currentmode == WIFI_AP) {
-    WiFi.mode(WIFI_AP_STA);
-  }
-  clearFrame();
-  // clean memory
-  WiFi.scanDelete();
-  int n = WiFi.scanNetworks();
-  esp3d_log("scan done");
-  if (n == 0) {
-    esp3d_log("no networks found");
-  } else {
-    esp3d_log("%d networks found", n);
-    clearFrame();
-    _frame[CHITU_FRAME_HEAD_OFFSET] = CHITU_FRAME_HEAD_FLAG;
-    _frame[CHITU_FRAME_TYPE_OFFSET] = CHITU_FRAME_DATA_HOTSPOTS_LIST_TYPE;
-    for (uint8_t i = 0; i < n; ++i) {
-      int8_t signal_rssi = 0;
-      if (total_hotspots > NB_HOTSPOT_MAX) {
-        break;
-      }
-      signal_rssi = WiFi.RSSI(i);
-      // Print SSID and RSSI for each network found
-      esp3d_log("%d: %s (%d) %s", i + 1, WiFi.SSID(i).c_str(), signal_rssi,
-                (WiFi.encryptionType(i) == ENC_TYPE_NONE) ? " " : "*");
-      ssid_name_length = WiFi.SSID(i).length();
-      if (ssid_name_length > MAX_SSID_LENGTH) {
-        esp3d_log_e("Name too long, ignored");
-        continue;
-      }
-      if (signal_rssi < MIN_RSSI) {
-        esp3d_log("Signal too low, ignored");
-        continue;
-      }
-      _frame[CHITU_FRAME_DATA_OFFSET + dataOffset] = ssid_name_length;
-      for (uint8_t p = 0; p < ssid_name_length; p++) {
-        _frame[CHITU_FRAME_DATA_OFFSET + dataOffset + 1 + p] = WiFi.SSID(i)[p];
-      }
-      _frame[CHITU_FRAME_DATA_OFFSET + dataOffset + ssid_name_length + 1] =
-          WiFi.RSSI(i);
-      dataOffset += ssid_name_length + 2;
-      total_hotspots++;
-    }
-    _frame[CHITU_FRAME_DATA_OFFSET] = total_hotspots;
-    _frame[CHITU_FRAME_DATA_OFFSET + dataOffset] = CHITU_FRAME_TAIL_FLAG;
-    _frame[CHITU_FRAME_DATALEN_OFFSET] = dataOffset & 0xff;
-    _frame[CHITU_FRAME_DATALEN_OFFSET + 1] = dataOffset >> 8;
-    esp3d_log("Size of data in frame %d ", dataOffset);
-    for (uint i = 0; i < dataOffset + 5; i++) {
-      esp3d_log("%c %x", _frame[i], _frame[i]);
-    }
-    if (canSendFrame()) {
-      if (esp3d_serial_service.writeBytes(_frame, dataOffset + 5) ==
-          (dataOffset + 5)) {
-        esp3d_log("Ok");
-        sendFrameDone();
-      } else {
-        esp3d_log_e("Send scan failed");
-      }
-    } else {
-      esp3d_log_e("Cannot send scan");
-    }
-    // clean memory
-    WiFi.scanDelete();
-  }
-  // Restore mode
-  WiFi.mode((WiFiMode_t)currentmode);
-  sendFrameDone();
-}
+void ChituService::doGcodeMessage(const char *msg, size_t len) {
+  char ctmp[128];
 
-void ChituService::handleChituMessage(const char *msg, size_t len) {
-  esp3d_log("Command is %d", type);
-  LOGMAGIC("CHITU Command: ");
+  LOGMAGIC("Gcode request: ");
   LOGMAGIC(msg,len);
-  LOGMAGIC("\n");
-  return;
-/*
-  switch (type) {
-    // wifi setup
-    case CHITU_TYPE_NET:
-      esp3d_log("************CHITU_TYPE_NET*************");
-      messageWiFiConfig(dataFrame, dataSize);
-      break;
-    // not supported in Marlin
-    // Confirmed as private source
-    case CHITU_TYPE_PRINTER:
-      // ignored
-      esp3d_log("************CHITU_TYPE_PRINTER*************");
-      break;
-    // File transfer if not command
-    case CHITU_TYPE_TRANSFER:
-      // todo
-      esp3d_log("************CHITU_TYPE_TRANSFER*************");
-      break;
-    // Error when doing transfer
-    case CHITU_TYPE_EXCEPTION:
-      esp3d_log("************CHITU_TYPE_EXCEPTION*************");
-      messageException(dataFrame, dataSize);
-      break;
-    // not supported (cloud)
-    case CHITU_TYPE_CLOUD:
-      // ignored
-      esp3d_log("************CHITU_TYPE_CLOUD*************");
-      break;
-    // not supported (cloud)
-    case CHITU_TYPE_WID:
-      // ignored
-      esp3d_log("************CHITU_TYPE_WID*************");
-      break;
-    // hot spot list
-    case CHITU_TYPE_SCAN_WIFI:
-      esp3d_log("************CHITU_TYPE_SCAN_WIFI*************");
-      sendWifiHotspots();
-      break;
-    // setup Manual IP
-    // not supported in Marlin, so do same for the moment
-    case CHITU_TYPE_MANUAL_IP:
-      // ignored
-      esp3d_log("************CHITU_TYPE_MANUAL_IP*************");
-      break;
-    // On/Off Wifi
-    case CHITU_TYPE_WIFI_CTRL:
-      esp3d_log("************CHITU_TYPE_WIFI_CTRL*************");
-      messageWiFiControl(dataFrame, dataSize);
-      break;
-    default:
-      esp3d_log_e("Unknow type");
-  }
-*/
-}
-
-void ChituService::messageWiFiControl(const uint8_t *dataFrame,
-                                    const size_t dataSize) {
-  if (dataSize != 1) {
-    return;
-  }
-  switch (dataFrame[0]) {
-    case CONNECT_STA:
-      esp3d_log("CONNECT_STA");
-      if (!NetConfig::started()) {
-        NetConfig::begin();
-      }
-      break;
-    case DISCONNECT_STA:
-      esp3d_log("CONNECT_STA");
-      if (NetConfig::started()) {
-        NetConfig::end();
-      }
-      break;
-    case REMOVE_STA_INFO:
-      esp3d_log("REMOVE_STA_INFO");
-      if (NetConfig::started()) {
-        NetConfig::end();
-      }
-      ESP3DSettings::reset(true);
-      break;
-    default:
-      esp3d_log_e("WiFi control flag not supported");
-  }
-}
-// Exception handle - but actually not used
-void ChituService::messageException(const uint8_t *dataFrame,
-                                  const size_t dataSize) {
-  if (dataSize != 1) {
-    return;
-  }
-  if ((dataFrame[0] == ERROR_STATE) || (dataFrame[0] == SUCCESS_STATE)) {
-    _uploadStatus = dataFrame[0];
-    esp3d_log("Tranfer: %s", dataFrame[0] == ERROR_STATE ? "Error" : "Success");
+  LOGMAGIC("\r\n");
+  if(len<100) {
+    sprintf(ctmp,"\r\n+IPD,4,%d:%s\r\nOK,recv\r\n",len,msg);
+    esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+    LOGMAGIC(ctmp);
   } else {
-    _uploadStatus = UNKNOW_STATE;
-    esp3d_log_e("Tranfer state unknown");
+    sprintf(ctmp,"MESSAGE TOO LONG! len=%d\r\n",len);
+    LOGMAGIC(ctmp);
   }
 }
 
-void ChituService::messageWiFiConfig(const uint8_t *dataFrame,
-                                   const size_t dataSize) {
-  String ssid;
-  String password;
-  String savedSsid;
-  String savedPassword;
-  bool needrestart = false;
-  // Sanity check
-  if (dataSize < 2) {
-    esp3d_log_e("Invalid data");
-    return;
-  }
-  if ((dataFrame[0] != CHITU_FRAME_NETWORK_AP_MODE) &&
-      (dataFrame[0] != CHITU_FRAME_NETWORK_STA_MODE)) {
-    esp3d_log_e("Invalid mode");
-    return;
-  }
-  if ((dataFrame[1] > dataSize - 3) || (dataFrame[1] == 0) ||
-      (dataFrame[1] > MAX_SSID_LENGTH)) {
-    esp3d_log_e("Invalid ssid size");
-    return;
-  }
-  if ((uint)(dataFrame[1] + 3) > dataSize) {
-    esp3d_log_e("Overflow password size");
-    return;
-  }
-  if ((dataFrame[dataFrame[1] + 2]) > MAX_PASSWORD_LENGTH) {
-    esp3d_log_e("Invalid password size");
-    return;
-  }
-  // get SSID and password
-  for (uint8_t i = 0; i < dataFrame[1]; i++) {
-    ssid += (char)dataFrame[2 + i];
-  }
-  for (uint8_t j = 0; j < dataFrame[2 + dataFrame[1]]; j++) {
-    password += (char)dataFrame[3 + j + dataFrame[1]];
-  }
-  if (dataFrame[0] == CHITU_FRAME_NETWORK_AP_MODE) {
-    if (ESP3DSettings::readByte(ESP_RADIO_MODE) != ESP_WIFI_AP) {
-      ESP3DSettings::writeByte(ESP_RADIO_MODE, ESP_WIFI_AP);
-      needrestart = true;
-    }
-    savedSsid = ESP3DSettings::readString(ESP_AP_SSID);
-    savedPassword = ESP3DSettings::readString(ESP_AP_PASSWORD);
-    if (savedSsid != ssid) {
-      ESP3DSettings::writeString(ESP_AP_SSID, ssid.c_str());
-      needrestart = true;
-    }
-    if (savedPassword != password) {
-      ESP3DSettings::writeString(ESP_AP_PASSWORD, password.c_str());
-      needrestart = true;
-    }
-  } else {
-    if (ESP3DSettings::readByte(ESP_RADIO_MODE) != ESP_WIFI_STA) {
-      ESP3DSettings::writeByte(ESP_RADIO_MODE, ESP_WIFI_STA);
-      needrestart = true;
-    }
-    savedSsid = ESP3DSettings::readString(ESP_STA_SSID);
-    savedPassword = ESP3DSettings::readString(ESP_STA_PASSWORD);
-    if (savedSsid != ssid) {
-      ESP3DSettings::writeString(ESP_STA_SSID, ssid.c_str());
-      needrestart = true;
-    }
-    if (savedPassword != password) {
-      ESP3DSettings::writeString(ESP_STA_PASSWORD, password.c_str());
-      needrestart = true;
-    }
-    if (needrestart) {
-      // change also to DHCP for new value
-      ESP3DSettings::writeByte(ESP_STA_IP_MODE, DHCP_MODE);
-    }
-  }
-  if (needrestart) {
-    esp3d_log("Modifications done - restarting network");
-    NetConfig::begin();
-  }
-}
+void ChituService::doChituMessage(const char *msg, size_t len) {
+  char ctmp[256];
 
-bool ChituService::canSendFrame() {
+  LOGMAGIC("Chitu request: ");
+  LOGMAGIC(msg,len);
+  LOGMAGIC("\r\n");
+  ctmp[0]=0;
+
   //
-  // CLE dummy
+  // CIPSEND ... Chitu IP Send?
+  // AT+CIPSEND=4,<SIZE>\r<PAYLOAD>
+  // incoming message length should equal the size plus the header bit up to the \r
   //
-  return false;
-
-  esp3d_log("Is board ready for frame?");
-  digitalWrite(ESP_FLAG_PIN, BOARD_READY_FLAG_VALUE);
-  uint32_t startTime = millis();
-  while ((millis() - startTime) < FRAME_WAIT_TO_SEND_TIMEOUT) {
-    if (digitalRead(BOARD_FLAG_PIN) == BOARD_READY_FLAG_VALUE) {
-      esp3d_log("Yes");
-      return true;
+  if(msg==strstr(msg,"AT+CIPSEND=4,")) {
+    // extract the payload length
+    int paylen=atoi(&msg[13]);
+    // determine the payload start
+    char *paystart=strchr(msg,'\r');
+    if(paystart) { paystart++; }
+    // Sanity check log messages
+    if(!paystart) { LOGMAGIC("CANNOT DETECT PAYLOAD LENGTH\r\n"); }
+    int expected=paylen+int(paystart-msg);
+    if(expected!=len) { 
+      sprintf(ctmp,"UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-msg));
+      LOGMAGIC(ctmp);
     }
-    ESP3DHal::wait(0);
-  }
-  esp3d_log("Time out no board answer");
-  return false;
-}
-
-void ChituService::sendFrameDone() {
-  // CLE dummy
-  return;
-
-  digitalWrite(ESP_FLAG_PIN, !BOARD_READY_FLAG_VALUE);
-}
-
-bool ChituService::sendGcodeFrame(const char *cmd) {
-  // CLE dummy
-  sendFrameDone();
-  return true;
-
-
-  if (_uploadMode) {
-    return false;
-  }
-  String tmp = cmd;
-  if (tmp.endsWith("\n")) {
-    tmp[tmp.length() - 1] = '\0';
-  }
-  esp3d_log("Packing: *%s*, size=%d", tmp.c_str(), strlen(tmp.c_str()));
-  clearFrame();
-  _frame[CHITU_FRAME_HEAD_OFFSET] = CHITU_FRAME_HEAD_FLAG;
-  _frame[CHITU_FRAME_TYPE_OFFSET] = CHITU_FRAME_DATA_COMMAND_TYPE;
-  for (uint i = 0; i < strlen(tmp.c_str()); i++) {
-    _frame[CHITU_FRAME_DATA_OFFSET + i] = tmp[i];
-  }
-  _frame[CHITU_FRAME_DATA_OFFSET + strlen(tmp.c_str())] = '\r';
-  _frame[CHITU_FRAME_DATA_OFFSET + strlen(tmp.c_str()) + 1] = '\n';
-  _frame[CHITU_FRAME_DATA_OFFSET + strlen(tmp.c_str()) + 2] = CHITU_FRAME_TAIL_FLAG;
-  _frame[CHITU_FRAME_DATALEN_OFFSET] = (strlen(tmp.c_str()) + 2) & 0xff;
-  _frame[CHITU_FRAME_DATALEN_OFFSET + 1] =
-      ((strlen(tmp.c_str()) + 2) >> 8) & 0xff;
-
-  esp3d_log("Size of data in frame %d ", strlen(tmp.c_str()) + 2);
-  // for (uint i =0; i< strlen(tmp.c_str())+7;i++){
-  // esp3d_log("%c %x",_frame[i],_frame[i]);
-  // }
-
-  if (canSendFrame()) {
-    if (esp3d_serial_service.writeBytes(_frame, strlen(tmp.c_str()) + 7) ==
-        (strlen(tmp.c_str()) + 7)) {
-      esp3d_log("Ok");
-      sendFrameDone();
-      return true;
-    }
-  }
-  esp3d_log_e("Failed");
-  sendFrameDone();
-  return false;
-}
-
-bool ChituService::sendNetworkFrame() {
-  size_t dataOffset = 0;
-  String s;
-  static uint32_t lastsend = 0;
-
-  // CLE DUMMY
-  sendFrameDone();
-  return true;
-
-  if (_uploadMode) {
-    return false;
-  }
-  if ((millis() - lastsend) > NET_FRAME_REFRESH_TIME) {
-    lastsend = millis();
-    esp3d_log("Network frame preparation");
-    // Prepare
-    clearFrame();
-    _frame[CHITU_FRAME_HEAD_OFFSET] = CHITU_FRAME_HEAD_FLAG;
-    _frame[CHITU_FRAME_TYPE_OFFSET] = CHITU_FRAME_DATA_NETWORK_TYPE;
-    if (NetConfig::getMode() == ESP_WIFI_STA) {
-      esp3d_log("STA Mode");
-      if (WiFi.status() == WL_CONNECTED) {
-        ///////////////////////////////////
-        // IP Segment
-        // IP value
-        IPAddress ip = NetConfig::localIPAddress();
-        _frame[CHITU_FRAME_DATA_OFFSET] = ip[0];
-        _frame[CHITU_FRAME_DATA_OFFSET + 1] = ip[1];
-        _frame[CHITU_FRAME_DATA_OFFSET + 2] = ip[2];
-        _frame[CHITU_FRAME_DATA_OFFSET + 3] = ip[3];
-        esp3d_log("IP %d.%d.%d.%d", _frame[CHITU_FRAME_DATA_OFFSET],
-                  _frame[CHITU_FRAME_DATA_OFFSET + 1],
-                  _frame[CHITU_FRAME_DATA_OFFSET + 2],
-                  _frame[CHITU_FRAME_DATA_OFFSET + 3]);
-        //////////////////////////////////
-        // State Segment
-        // Connected state (OK)
-        _frame[CHITU_FRAME_DATA_OFFSET + 6] = CHITU_FRAME_NETWORK_OK_STATE;
-      } else {
-        ///////////////////////////////////
-        // IP Segment
-        // No need - bytes are already cleared
-        //////////////////////////////////
-        // State Segment
-        // Connected state (Disconnected)
-        _frame[CHITU_FRAME_DATA_OFFSET + 6] = CHITU_FRAME_NETWORK_FAIL_STATE;
-      }
-      //////////////////////////////////
-      // Mode Segment
-      _frame[CHITU_FRAME_DATA_OFFSET + 7] = CHITU_FRAME_NETWORK_STA_MODE;
-      //////////////////////////////////
-      // Wifi_name_len Segment
-      s = ESP3DSettings::readString(ESP_STA_SSID);
-      _frame[CHITU_FRAME_DATA_OFFSET + 8] = s.length();
-      dataOffset = CHITU_FRAME_DATA_OFFSET + 9;
-      //////////////////////////////////
-      // Wifi_name Segment
-      strcpy((char *)&_frame[dataOffset], s.c_str());
-      dataOffset += s.length();
-      //////////////////////////////////
-      // Wifi_key_len Segment
-      s = ESP3DSettings::readString(ESP_STA_PASSWORD);
-      _frame[dataOffset] = s.length();
-      dataOffset++;
-      //////////////////////////////////
-      // Wifi_key Segment
-      strcpy((char *)&_frame[dataOffset], s.c_str());
-      dataOffset += s.length();
-    } else if (NetConfig::getMode() == ESP_WIFI_AP ||
-               (NetConfig::getMode() == ESP_AP_SETUP)) {
-      esp3d_log("AP Mode");
-      ///////////////////////////////////
-      // IP Segment
-      // IP value
-      IPAddress ip = NetConfig::localIPAddress();
-      _frame[CHITU_FRAME_DATA_OFFSET] = ip[0];
-      _frame[CHITU_FRAME_DATA_OFFSET + 1] = ip[1];
-      _frame[CHITU_FRAME_DATA_OFFSET + 2] = ip[2];
-      _frame[CHITU_FRAME_DATA_OFFSET + 3] = ip[3];
-      //////////////////////////////////
-      // State Segment
-      // Connected state (OK)
-      _frame[CHITU_FRAME_DATA_OFFSET + 6] = CHITU_FRAME_NETWORK_OK_STATE;
-      //////////////////////////////////
-      // Mode Segment
-      _frame[CHITU_FRAME_DATA_OFFSET + 7] = CHITU_FRAME_NETWORK_AP_MODE;
-      //////////////////////////////////
-      // Wifi_name_len Segment
-      String s = ESP3DSettings::readString(ESP_AP_SSID);
-      _frame[CHITU_FRAME_DATA_OFFSET + 8] = s.length();
-      dataOffset = CHITU_FRAME_DATA_OFFSET + 9;
-      //////////////////////////////////
-      // Wifi_name Segment
-      strcpy((char *)&_frame[dataOffset], s.c_str());
-      dataOffset += s.length();
-      //////////////////////////////////
-      // Wifi_key_len Segment
-      s = ESP3DSettings::readString(ESP_AP_PASSWORD);
-      _frame[dataOffset] = s.length();
-      dataOffset++;
-      //////////////////////////////////
-      // Wifi_key Segment
-      strcpy((char *)&_frame[dataOffset], s.c_str());
-      dataOffset += s.length();
+    //
+    // Send the payload where it belongs (based on ESP3DSerialService::flushData for now)
+    //
+    ESP3DMessage *message=esp3d_message_manager.newMsg(ESP3DClientType::chitu_serial,ESP3DClientType::all_clients,(uint8_t*)paystart,paylen,ESP3DAuthenticationLevel::admin);
+    if(message) {
+      message->type=ESP3DMessageType::unique;
+      esp3d_commands.process(message);
+      LOGMAGIC("PROCESSED OUTGOING PAYLOAD: ");
+      LOGMAGIC(paystart,paylen);
+      LOGMAGIC("\r\n");
     } else {
-      // not supported
-      esp3d_log_e("Mode not supported : %d ", NetConfig::getMode());
-      return false;
+      LOGMAGIC("COULD NOT CREATE ESP3D MESSAGE FROM PAYLOAD: ");
+      LOGMAGIC(paystart,paylen);
+      LOGMAGIC("\r\n");
     }
-    //////////////////////////////////
-    // Cloud Services port Segment
-    // hard coded
-    _frame[CHITU_FRAME_DATA_OFFSET + 4] = (telnet_server.port()) & 0xff;
-    _frame[CHITU_FRAME_DATA_OFFSET + 5] = ((telnet_server.port()) >> 8) & 0xff;
-    esp3d_log("Cloud port: %d", (telnet_server.port()));
-
-    //////////////////////////////////
-    // Cloud State Segment
-    // hard coded as disabled in upstream FW
-    _frame[dataOffset] = CHITU_FRAME_CLOUD_DISABLED_STATE;
-    dataOffset++;
-    //////////////////////////////////
-    // Cloud host len Segment
-    // Use ESP3D IP instead
-    s = NetConfig::localIPAddress().toString();
-    _frame[dataOffset] = s.length();
-    dataOffset++;
-    //////////////////////////////////
-    // Cloud host Segment
-    // Use ESP3D IP instead
-    strcpy((char *)&_frame[dataOffset], s.c_str());
-    dataOffset += s.length();
-    //////////////////////////////////
-    // Cloud host port Segment
-    // use webserver port instead
-    _frame[dataOffset] = (HTTP_Server::port()) & 0xff;
-    dataOffset++;
-    _frame[dataOffset] = ((HTTP_Server::port()) >> 8) & 0xff;
-    dataOffset++;
-    //////////////////////////////////
-    // Module id len Segment
-    // Use hostname instead
-    _frame[dataOffset] = strlen(_moduleId);
-    dataOffset++;
-    //////////////////////////////////
-    // Module id  Segment
-    strcpy((char *)&_frame[dataOffset], _moduleId);
-    dataOffset += strlen(_moduleId);
-    //////////////////////////////////
-    // FW version len Segment
-    _frame[dataOffset] = strlen(FW_VERSION) + 6;
-    dataOffset++;
-    //////////////////////////////////
-    // FW version  Segment
-    strcpy((char *)&_frame[dataOffset], "ESP3D_" FW_VERSION);
-    dataOffset += strlen(FW_VERSION) + 6;
-    //////////////////////////////////
-    // Tail Segment
-    _frame[dataOffset] = CHITU_FRAME_TAIL_FLAG;
-
-    //////////////////////////////////
-    // Data len Segment
-    // Calculated from above
-    _frame[CHITU_FRAME_DATALEN_OFFSET] = (dataOffset - 4) & 0xff;
-    _frame[CHITU_FRAME_DATALEN_OFFSET + 1] = ((dataOffset - 4) >> 8) & 0xff;
-    esp3d_log("Size of data in frame %d ", dataOffset - 4);
-    if (canSendFrame()) {
-      if (esp3d_serial_service.writeBytes(_frame, dataOffset + 1) ==
-          (dataOffset + 1)) {
-        esp3d_log("Ok");
-        sendFrameDone();
-        return true;
-      }
-    }
-    sendFrameDone();
-    esp3d_log_e("Failed");
+    sprintf(ctmp,"OK,SEND DONE\r\n");
+  } else if(msg==strstr(msg,"AT+GMR\r\n")) {
+    //
+    // Handle AT+GMR request
+    //
+    //
+    // real Chitu ESP returns an authentication related code followed by the firmware version.
+    // return xx for the authenticaion code nd the ESP3D version
+    //
+    sprintf(ctmp,"+GMR:xx,xx,xx,xx,xx,xx,xx,xx V10.0.12aa\r\n","FW_VERSION");
+    //sprintf(ctmp,"+GMR:xx,xx,xx,xx,xx,xx,xx,xx V%s\r\n",FW_VERSION);
+  } else if(msg==strstr(msg,"AT+CIFSR\r\n")) {
+    //
+    // real ESP returns these lines.  
+    //
+    // APIP (standalone access point mode IP address)
+    // APMAC (standalone access point mac).  Not used by qidi gui so I do not populate now
+    // STAIP (station IP address).  
+    // STAMAC (station access point mac).  Not used by qidi gui so I do not populate now
+    //
+    IPAddress apip(ESP3DSettings::read_IP(ESP_AP_IP_VALUE));
+    IPAddress staip=WiFi.localIP();
+    sprintf(ctmp,"+CIFSR:APIP,%d.%d.%d.%d\r\n+CIFSR:APMAC,%s\r\n+CIFSR:STAIP,%d.%d.%d.%d\r\n+CIFSR:STAMAC,%s\r\n\r\nOK\r\n",apip[0],apip[1],apip[2],apip[3],"00:00:00:00:00:00",staip[0],staip[1],staip[2],staip[3],"00:00:00:00:00:00");
+  } else if(msg==strstr(msg,"AT+CWJAP?\r\n")) {
+    //
+    // Station mode access point
+    //
+    sprintf(ctmp,"+CWJAP:\"%s\"\r\n\r\nOK\r\n",ESP3DSettings::readString(ESP_STA_SSID));
+  } else if(msg==strstr(msg,"AT+CWSAP?\r\n")) {
+    //
+    // Standalone access point details.  insert [e] and [d] to indicate enablement
+    //
+    String savedSsid = ESP3DSettings::readString(ESP_AP_SSID);
+    String savedPassword = ESP3DSettings::readString(ESP_AP_PASSWORD);
+    const char *rmc="[d]";
+    uint8_t rm=ESP3DSettings::readByte(ESP_RADIO_MODE);
+    if(rm==ESP_WIFI_AP) { rmc="[e]"; }
+    sprintf(ctmp,"+CWSAP:%s\"%s\",\"%s\",1,0\r\n\r\nOK\r\n",rmc,savedSsid.c_str(),savedPassword.c_str());
   }
-
-  return false;
+  //
+  // If we have built up a response write it out.
+  //
+  if(ctmp[0]) {
+    LOGMAGIC("RESPONSE: ");
+    LOGMAGIC(ctmp);
+    LOGMAGIC("\r\n");
+    esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+  } else {
+    LOGMAGIC("UNKNOWN REQUEST!!!!!  IGNORE!!!\r\n");
+  }
+  return;
 }
 
-void ChituService::clearFrame(uint start) {
-  memset(&_frame[start], 0, sizeof(_frame) - start);
+//
+// REFACTOR -- used by http upload mode
+//
+bool ChituService::sendGcodeFrame(const char *cmd) {
+  LOGMAGIC("sendGcodeFrame!!!\r\n");
+  return true;
 }
+
 void ChituService::handle() {
   if (_started) {
-    sendNetworkFrame();
+     // TODO every 10 seconds
   }
-  // network frame every 10s
 }
 void ChituService::end() { _started = false; }
 

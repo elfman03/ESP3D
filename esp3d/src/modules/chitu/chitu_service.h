@@ -28,17 +28,11 @@
 class ChituService {
  public:
   static bool begin();
-  static bool sendNetworkFrame();
   static bool dispatch(ESP3DMessage* message);
   static bool sendGcodeFrame(const char* cmd);
   static void handle();
-  static void handleChituMessage(const char* msg, size_t len);
   static void end();
   static bool started() { return _started; }
-  //static bool isHead(const char c);
-  //static bool isTail(const char c);
-  //static bool isFrame(const char c);
-  //static bool isCommand(const char c);
   static bool sendFirstFragment(const char* filename, size_t filesize);
   static bool sendFragment(const uint8_t* dataFrame, const size_t dataSize,
                            uint fragmentID);
@@ -48,19 +42,9 @@ class ChituService {
 
  private:
   static uint8_t _uploadStatus;
-  static long _commandBaudRate;
-  static void sendWifiHotspots();
-  static void messageWiFiControl(const uint8_t* dataFrame,
-                                 const size_t dataSize);
-  static void messageException(const uint8_t* dataFrame, const size_t dataSize);
-  static void messageWiFiConfig(const uint8_t* dataFrame,
-                                const size_t dataSize);
-  static void clearFrame(uint start = 0);
-  static bool canSendFrame();
-  static void sendFrameDone();
+  static void doGcodeMessage(const char* msg, size_t len);
+  static void doChituMessage(const char* msg, size_t len);
   static bool _started;
-  static uint8_t _frame[CHITU_FRAME_SIZE];
-  static char _moduleId[22];
   static bool _uploadMode;
 };
 
