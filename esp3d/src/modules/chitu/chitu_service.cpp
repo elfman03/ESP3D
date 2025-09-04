@@ -28,9 +28,7 @@
 #include "../serial/serial_service.h"
 #include "../telnet/telnet_server.h"
 #include "../wifi/wificonfig.h"
-#ifdef LOGMAGIC_FEATURE
 #include "../logmagic/logmagic_server.h"
-#endif // LOGMAGIC_FEATURE
 #include "chitu_service.h"
 
 #define UNKNOW_STATE 0x0
@@ -220,10 +218,13 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
     //
     //
     // real Chitu ESP returns an authentication related code followed by the firmware version.
-    // return xx for the authenticaion code nd the ESP3D version
+    // return 0s for auth code seed and the ESP3D version
+    // Based on experimentation, version must start with V and can contain up to 8 additional 
+    //                           characters if followed by a \r\n or 9 addition if followed by just \n
     //
-    sprintf(ctmp,"+GMR:xx,xx,xx,xx,xx,xx,xx,xx V10.0.12aa\r\n","FW_VERSION");
-    //sprintf(ctmp,"+GMR:xx,xx,xx,xx,xx,xx,xx,xx V%s\r\n",FW_VERSION);
+    //sprintf(ctmp,"+GMR:00,00,00,00,00,00,00,00 V10.0.12a\r\n\r\nOK\r\n");
+    //sprintf(ctmp,"+GMR:00,00,00,00,00,00,00,00 V%s\n\r\nOK\r\n",FW_VERSION);
+    sprintf(ctmp,"+GMR:00,00,00,00,00,00,00,00 V%s\n\r\nOK\r\n","ESP3d-3ce");
   } else if(msg==strstr(msg,"AT+CIFSR\r\n")) {
     //
     // real ESP returns these lines.  

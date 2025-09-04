@@ -21,6 +21,10 @@
 #ifndef _LOGMAGIC_SERVER_H
 #define _LOGMAGIC_SERVER_H
 
+#if !defined(LOGMAGIC_FEATURE)
+#define LOGMAGIC(...) 
+#else
+
 #include <WiFiClient.h>
 #include <WiFiServer.h>
 
@@ -31,7 +35,6 @@
 #ifdef LOGMAGIC_FEATURE
   #define LOGMAGIC(...) logmagic_server.post(__VA_ARGS__);
 #else
-  #define LOGMAGIC(...)
 #endif
 
 class LogMagic_Server {
@@ -62,4 +65,5 @@ class LogMagic_Server {
 
 extern LogMagic_Server logmagic_server;
 
+#endif // LOGMAGIC_FEATURE
 #endif
