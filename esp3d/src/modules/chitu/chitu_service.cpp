@@ -29,6 +29,7 @@
 #include "../telnet/telnet_server.h"
 #include "../wifi/wificonfig.h"
 #include "../logmagic/logmagic_server.h"
+#include <WiFiUDP.h>
 #include "chitu_service.h"
 
 #define UNKNOW_STATE 0x0
@@ -38,9 +39,12 @@
 #define CHITU_INIT_BAUD_RATE 115200
 #define CHITU_POSTINIT_BAUD_RATE 2250000
 
+extern HardwareSerial *Serials[];
+
 bool ChituService::_started = false;
 uint8_t ChituService::_uploadStatus = UNKNOW_STATE;
 bool ChituService::_uploadMode = false;
+WiFiUDP ChituService::_udp;
 
 bool ChituService::dispatch(ESP3DMessage *message) {
   char ctmp[128];
@@ -59,7 +63,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
     return true;
   }
   if(message->origin==ESP3DClientType::http) {
-    doGcodeMessage((const char*)message->data,message->size);
+    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0);
     esp3d_message_manager.deleteMsg(message);
     return true;
   }
@@ -74,6 +78,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
 }
 
 bool ChituService::begin() {
+  _udp.begin(3000);
   _started = true;
   //
   // Analysis indicates that this payload is sent by an official Chitu ESP01 (Qidi X-Plus)
@@ -154,20 +159,116 @@ bool ChituService::sendFragment(const uint8_t *dataFrame, const size_t dataSize,
   return true;
 }
 
-void ChituService::doGcodeMessage(const char *msg, size_t len) {
+void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int port) {
+  char obuf[256];
   char ctmp[128];
+  uint8_t ser;
 
   LOGMAGIC("Gcode request: ");
   LOGMAGIC(msg,len);
   LOGMAGIC("\r\n");
-  if(len<100) {
-    sprintf(ctmp,"\r\n+IPD,4,%d:%s\r\nOK,recv\r\n",len,msg);
-    esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+  if(len>220) {
+    sprintf(ctmp,"ERROR - CHITU GCODE MESSAGE TOO LONG! len=%d\r\n",len);
     LOGMAGIC(ctmp);
-  } else {
-    sprintf(ctmp,"MESSAGE TOO LONG! len=%d\r\n",len);
-    LOGMAGIC(ctmp);
+    return;
   }
+  //
+  // Package into +IPD payload to chitu and send
+  //
+  sprintf(obuf,"\r\n+IPD,4,%d:%s\r\nOK,recv\r\n",len,msg);
+  esp3d_serial_service.writeBytes((const uint8_t*)obuf, strlen(obuf));
+  esp3d_serial_service.flush();
+  LOGMAGIC(obuf);
+  //
+  // Wait up to a second for a response.  response ends with newline
+  //
+  ser=esp3d_serial_service.serialIndex();
+  uint32_t t1=millis();
+  obuf[0]=0;
+  int olen=0;
+  bool newline=false;
+  //
+  // Allow up to 255 bytes from Chitu
+  //
+  for(olen=0;olen<255 && !newline;olen++) {
+    while(!Serials[ser]->available()) {
+      ESP3DHal::wait(1);
+      if((millis()-t1)>1000) {
+        LOGMAGIC("ERROR - CHITU SERIAL GCODE ... NO RESPONSE COMPLETION IN 1s\r\n");
+        return;
+      }
+    }
+    // byte by byte to not accidently read past the newline
+    //
+    obuf[olen]=Serials[ser]->read();
+    if(obuf[olen]=='\n') { newline=true; }
+  }
+  obuf[olen]=0;
+  //
+  // Check for overflow
+  //
+  if(olen==255) {
+    LOGMAGIC("ERROR - CHITU SERIAL GCODE OVERFLOW...\r\n");
+    return;
+  }
+  sprintf(ctmp,"GCODE RESPONSE (%d)\r\n",olen);
+  LOGMAGIC(ctmp);
+  LOGMAGIC(obuf);
+  LOGMAGIC("\r\n");
+  //
+  // We expect a CIPSEND from Chitu
+  //
+  if(obuf!=strstr(obuf,"AT+CIPSEND=4,")) {
+    sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND (%d)\r\n",olen);
+    LOGMAGIC(ctmp);
+    LOGMAGIC(obuf);
+    LOGMAGIC("\r\n");
+    return;
+  }
+  // extract the payload length
+  int paylen=atoi(&obuf[13]);
+  // determine the payload start
+  char *paystart=strchr(obuf,'\r');
+  if(paystart) { paystart++; }
+  // Sanity check log messages
+  if(!paystart) { 
+    LOGMAGIC("ERROR - CHITU CANNOT DETECT PAYLOAD LENGTH\r\n"); 
+    return;
+  }
+  int expected=paylen+int(paystart-obuf);
+  if(expected!=olen) { 
+    sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-msg));
+    LOGMAGIC(ctmp);
+    return;
+  }
+  if(port) {
+    //
+    // datagram GCode.  Send out as a datagram
+    //
+    LOGMAGIC("CHITU RESPONSE TO UDP GUEST\r\n");
+    LOGMAGIC(paystart,paylen);
+    _udp.beginPacket(ip,port);
+    _udp.write(paystart,paylen);
+    _udp.endPacket();
+  } else {
+    //
+    // Send the payload where it belongs (based on ESP3DSerialService::flushData for now)
+    //
+    ESP3DMessage *message=esp3d_message_manager.newMsg(ESP3DClientType::chitu_serial,ESP3DClientType::all_clients,(uint8_t*)paystart,paylen,ESP3DAuthenticationLevel::admin);
+    if(message) {
+      message->type=ESP3DMessageType::unique;
+      esp3d_commands.process(message);
+      LOGMAGIC("PROCESSED OUTGOING PAYLOAD: ");
+      LOGMAGIC(paystart,paylen);
+      LOGMAGIC("\r\n");
+    } else {
+      LOGMAGIC("COULD NOT CREATE ESP3D MESSAGE FROM PAYLOAD: ");
+      LOGMAGIC(paystart,paylen);
+      LOGMAGIC("\r\n");
+    }
+  }
+  sprintf(ctmp,"OK,SEND DONE\r\n");
+  esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
 }
 
 void ChituService::doChituMessage(const char *msg, size_t len) {
@@ -267,6 +368,36 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
   return;
 }
 
+void ChituService::doDatagram(const char*buf, int sz, IPAddress srcIp, int srcPort) {
+  char ctmp[128];
+  //
+  // Primordial message from client multicasts a M99999.  Respond with contact info
+  // Format determined from wireshark of communication between ChituHB and actual Chitu ESP01
+  //
+  if(sz==6 && strstr(buf,"M99999")) {
+    //
+    // extract local IP and MAC
+    //
+    IPAddress staip=WiFi.localIP();
+    byte mac[6];
+    WiFi.macAddress(mac);
+    //
+    // build the payload packet
+    //
+    sprintf(ctmp,"ok MAC:%02x:%02x:%02x:%02x:%02x:%02x IP:%d.%d.%d.%d VER:%s ID:00,00,00,00,00,00,00,00 NAME:%s\r\n",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0],staip[0],staip[1],staip[2],staip[3],FW_VERSION,"ESP3d-3ce");
+    LOGMAGIC("Respond to M99999: ");
+    LOGMAGIC(ctmp);
+    //
+    // send payload packet
+    //
+    _udp.beginPacket(srcIp,srcPort);
+    _udp.write(ctmp);
+    _udp.endPacket();
+  } else {
+    doGcodeMessage(buf,sz,srcIp,srcPort);
+  }
+}
+
 //
 // REFACTOR -- used by http upload mode
 //
@@ -276,10 +407,28 @@ bool ChituService::sendGcodeFrame(const char *cmd) {
 }
 
 void ChituService::handle() {
+  char buf[1450];
+  int rct,avail;
   if (_started) {
-     // TODO every 10 seconds
+     avail=_udp.parsePacket();
+     if(avail) {
+       char ctmp[128];
+       IPAddress remoteIp=_udp.remoteIP();
+       int remotePort=_udp.remotePort();
+       rct=_udp.read(buf,1450);
+       sprintf(ctmp,"CHITU RECEIVED datagram size %d:",rct);
+       LOGMAGIC(ctmp);
+       LOGMAGIC(buf,rct);
+       LOGMAGIC("\r\n");
+       buf[rct]=0;
+       doDatagram(buf,rct,remoteIp,remotePort);
+     }
   }
 }
-void ChituService::end() { _started = false; }
+
+void ChituService::end() { 
+  _started = false; 
+  _udp.stop();
+}
 
 #endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL

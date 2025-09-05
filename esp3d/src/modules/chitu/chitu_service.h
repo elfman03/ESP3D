@@ -25,6 +25,8 @@
 #define CHITU_FRAME_SIZE 1024
 #define CHITU_FRAME_DATA_MAX_SIZE (CHITU_FRAME_SIZE - 5 - 4)
 #include "../../core/esp3d_message.h"
+#include <WiFiUDP.h>
+
 class ChituService {
  public:
   static bool begin();
@@ -42,9 +44,11 @@ class ChituService {
 
  private:
   static uint8_t _uploadStatus;
-  static void doGcodeMessage(const char* msg, size_t len);
+  static void doGcodeMessage(const char* msg, size_t len, IPAddress ip, int port);
   static void doChituMessage(const char* msg, size_t len);
+  static void doDatagram(const char* buf, int sz, IPAddress srcIp, int srcPort);
   static bool _started;
+  static WiFiUDP _udp;
   static bool _uploadMode;
 };
 
