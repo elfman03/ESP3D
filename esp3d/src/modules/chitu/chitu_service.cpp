@@ -159,43 +159,29 @@ bool ChituService::sendFragment(const uint8_t *dataFrame, const size_t dataSize,
   return true;
 }
 
-void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int port) {
-  char obuf[256];
-  char ctmp[128];
-  uint8_t ser;
-
-  LOGMAGIC("Gcode request: ");
-  LOGMAGIC(msg,len);
-  LOGMAGIC("\r\n");
-  if(len>220) {
-    sprintf(ctmp,"ERROR - CHITU GCODE MESSAGE TOO LONG! len=%d\r\n",len);
-    LOGMAGIC(ctmp);
-    return;
-  }
-  //
-  // Package into +IPD payload to chitu and send
-  //
-  sprintf(obuf,"\r\n+IPD,4,%d:%s\r\nOK,recv\r\n",len,msg);
-  esp3d_serial_service.writeBytes((const uint8_t*)obuf, strlen(obuf));
-  esp3d_serial_service.flush();
-  LOGMAGIC(obuf);
+//
+// Waits up for a second for a full line from Chitu and returns it in the provided buffer.  
+// returns bytes read or zero in case of timeout or overflow.
+//
+int ChituService::pullChituLine(char *obuf, int max) {
   //
   // Wait up to a second for a response.  response ends with newline
   //
-  ser=esp3d_serial_service.serialIndex();
+  uint8_t ser=esp3d_serial_service.serialIndex();
   uint32_t t1=millis();
   obuf[0]=0;
-  int olen=0;
+  int olen;
   bool newline=false;
   //
-  // Allow up to 255 bytes from Chitu
+  // Allow up to max bytes from Chitu
   //
-  for(olen=0;olen<255 && !newline;olen++) {
+  for(olen=0;olen<max && !newline;olen++) {
     while(!Serials[ser]->available()) {
       ESP3DHal::wait(1);
       if((millis()-t1)>1000) {
         LOGMAGIC("ERROR - CHITU SERIAL GCODE ... NO RESPONSE COMPLETION IN 1s\r\n");
-        return;
+        obuf[0]=0;
+        return 0;
       }
     }
     // byte by byte to not accidently read past the newline
@@ -203,72 +189,119 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
     obuf[olen]=Serials[ser]->read();
     if(obuf[olen]=='\n') { newline=true; }
   }
-  obuf[olen]=0;
   //
   // Check for overflow
   //
-  if(olen==255) {
+  if(olen==max) {
     LOGMAGIC("ERROR - CHITU SERIAL GCODE OVERFLOW...\r\n");
-    return;
+    obuf[0]=0;
+    return 0;
   }
-  sprintf(ctmp,"GCODE RESPONSE (%d)\r\n",olen);
+  obuf[olen]=0;
+  //
+  //
+  //
+  char ctmp[32];
+  sprintf(ctmp,"CHITU OUTPUT (%d)\r\n",olen);
   LOGMAGIC(ctmp);
-  LOGMAGIC(obuf);
+  LOGMAGIC(obuf,olen);
   LOGMAGIC("\r\n");
   //
-  // We expect a CIPSEND from Chitu
-  //
-  if(obuf!=strstr(obuf,"AT+CIPSEND=4,")) {
-    sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND (%d)\r\n",olen);
-    LOGMAGIC(ctmp);
-    LOGMAGIC(obuf);
-    LOGMAGIC("\r\n");
-    return;
-  }
-  // extract the payload length
-  int paylen=atoi(&obuf[13]);
-  // determine the payload start
-  char *paystart=strchr(obuf,'\r');
-  if(paystart) { paystart++; }
-  // Sanity check log messages
-  if(!paystart) { 
-    LOGMAGIC("ERROR - CHITU CANNOT DETECT PAYLOAD LENGTH\r\n"); 
-    return;
-  }
-  int expected=paylen+int(paystart-obuf);
-  if(expected!=olen) { 
-    sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-msg));
-    LOGMAGIC(ctmp);
-    return;
-  }
+  return olen;
+}
+
+void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int port) {
   if(port) {
     //
     // datagram GCode.  Send out as a datagram
     //
     LOGMAGIC("CHITU RESPONSE TO UDP GUEST\r\n");
-    LOGMAGIC(paystart,paylen);
+    LOGMAGIC(buf,len);
     _udp.beginPacket(ip,port);
-    _udp.write(paystart,paylen);
+    _udp.write(buf,len);
     _udp.endPacket();
   } else {
     //
     // Send the payload where it belongs (based on ESP3DSerialService::flushData for now)
     //
-    ESP3DMessage *message=esp3d_message_manager.newMsg(ESP3DClientType::chitu_serial,ESP3DClientType::all_clients,(uint8_t*)paystart,paylen,ESP3DAuthenticationLevel::admin);
+    ESP3DMessage *message=esp3d_message_manager.newMsg(ESP3DClientType::chitu_serial,ESP3DClientType::all_clients,(uint8_t*)buf,len,ESP3DAuthenticationLevel::admin);
     if(message) {
       message->type=ESP3DMessageType::unique;
       esp3d_commands.process(message);
       LOGMAGIC("PROCESSED OUTGOING PAYLOAD: ");
-      LOGMAGIC(paystart,paylen);
+      LOGMAGIC(buf,len);
       LOGMAGIC("\r\n");
     } else {
       LOGMAGIC("COULD NOT CREATE ESP3D MESSAGE FROM PAYLOAD: ");
-      LOGMAGIC(paystart,paylen);
+      LOGMAGIC(buf,len);
       LOGMAGIC("\r\n");
     }
   }
-  sprintf(ctmp,"OK,SEND DONE\r\n");
-  esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+}
+
+void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int port) {
+  char obuf[256];
+  char ctmp[128];
+  int olen;
+  bool okfound=false;
+
+  LOGMAGIC("Gcode request: ");
+  LOGMAGIC(msg,len);
+  LOGMAGIC("\r\n");
+
+  //
+  // Send to Chitu (a) +IPD header, (b) payload, (c) trailer
+  //
+  sprintf(obuf,"\r\n+IPD,4,%d:",len);
+  esp3d_serial_service.writeBytes((const uint8_t*)obuf, strlen(obuf)); // header
+  esp3d_serial_service.writeBytes((const uint8_t*)msg, len);           // payload
+  sprintf(obuf,"\r\nOK,recv\r\n",len,msg);
+  esp3d_serial_service.writeBytes((const uint8_t*)obuf, strlen(obuf)); // trailer
+  esp3d_serial_service.flush();
+
+  //
+  // We expect CIPSEND(s) from Chitu with last one starting with ok.
+  // CIPSEND ... Chitu IP Send?
+  // AT+CIPSEND=4,<SIZE>\r<PAYLOAD>
+  // incoming message length should equal the size plus the header bit up to the \r
+  //
+  //
+  while(!okfound) {
+    olen=ChituService::pullChituLine(obuf, 255);
+    //
+    // Verify we got a cipsend or bail.
+    //
+    if(obuf!=strstr(obuf,"AT+CIPSEND=4,")) {
+      sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND (%d)\r\n",olen);
+      LOGMAGIC(ctmp);
+      LOGMAGIC(obuf);
+      LOGMAGIC("\r\n");
+      return;
+    }
+    // extract the payload length
+    int paylen=atoi(&obuf[13]);
+    // determine the payload start
+    char *paystart=strchr(obuf,'\r');
+    if(paystart) { paystart++; }
+    // Sanity check log messages
+    if(!paystart) { 
+      LOGMAGIC("ERROR - CHITU CANNOT DETECT PAYLOAD START\r\n"); 
+      return;
+    }
+    int expected=paylen+int(paystart-obuf);
+    if(expected!=olen) { 
+      sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-msg));
+      LOGMAGIC(ctmp);
+      return;
+    }
+    sendResponseHome(paystart, paylen, ip, port);
+    sprintf(ctmp,"OK,SEND DONE\r\n");
+    esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+    //
+    // Is this the last expected line in this series?
+    //
+    if(paylen>2 && paystart[0]=='o' && paystart[1]=='k') { okfound=true; }
+  }
 }
 
 void ChituService::doChituMessage(const char *msg, size_t len) {
@@ -279,40 +312,10 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
   LOGMAGIC("\r\n");
   ctmp[0]=0;
 
-  //
-  // CIPSEND ... Chitu IP Send?
-  // AT+CIPSEND=4,<SIZE>\r<PAYLOAD>
-  // incoming message length should equal the size plus the header bit up to the \r
-  //
   if(msg==strstr(msg,"AT+CIPSEND=4,")) {
-    // extract the payload length
-    int paylen=atoi(&msg[13]);
-    // determine the payload start
-    char *paystart=strchr(msg,'\r');
-    if(paystart) { paystart++; }
-    // Sanity check log messages
-    if(!paystart) { LOGMAGIC("CANNOT DETECT PAYLOAD LENGTH\r\n"); }
-    int expected=paylen+int(paystart-msg);
-    if(expected!=len) { 
-      sprintf(ctmp,"UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-msg));
-      LOGMAGIC(ctmp);
-    }
-    //
-    // Send the payload where it belongs (based on ESP3DSerialService::flushData for now)
-    //
-    ESP3DMessage *message=esp3d_message_manager.newMsg(ESP3DClientType::chitu_serial,ESP3DClientType::all_clients,(uint8_t*)paystart,paylen,ESP3DAuthenticationLevel::admin);
-    if(message) {
-      message->type=ESP3DMessageType::unique;
-      esp3d_commands.process(message);
-      LOGMAGIC("PROCESSED OUTGOING PAYLOAD: ");
-      LOGMAGIC(paystart,paylen);
-      LOGMAGIC("\r\n");
-    } else {
-      LOGMAGIC("COULD NOT CREATE ESP3D MESSAGE FROM PAYLOAD: ");
-      LOGMAGIC(paystart,paylen);
-      LOGMAGIC("\r\n");
-    }
-    sprintf(ctmp,"OK,SEND DONE\r\n");
+    LOGMAGIC("ERROR - IGNORE UNSOLICITED CHITU CIPSEND...: ");
+    LOGMAGIC(msg,len);
+    LOGMAGIC("\r\n");
   } else if(msg==strstr(msg,"AT+GMR\r\n")) {
     //
     // Handle AT+GMR request

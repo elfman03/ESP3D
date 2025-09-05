@@ -45,6 +45,8 @@ class ChituService {
  private:
   static uint8_t _uploadStatus;
   static void doGcodeMessage(const char* msg, size_t len, IPAddress ip, int port);
+  static void sendResponseHome(const char* buf, int len, IPAddress ip, int port);
+  static int pullChituLine(char* obuf, int maxlen);
   static void doChituMessage(const char* msg, size_t len);
   static void doDatagram(const char* buf, int sz, IPAddress srcIp, int srcPort);
   static bool _started;
