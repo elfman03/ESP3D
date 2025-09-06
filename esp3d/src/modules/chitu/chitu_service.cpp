@@ -46,8 +46,12 @@ extern HardwareSerial *Serials[];
 bool ChituService::_started = false;
 uint8_t ChituService::_uploadStatus = UNKNOW_STATE;
 bool ChituService::_uploadMode = false;
+bool ChituService::_inDatagram = false;
 WiFiUDP ChituService::_udp;
 
+//
+// Message bus message coming in from the esp3d core
+//
 bool ChituService::dispatch(ESP3DMessage *message) {
   char ctmp[128];
   //
@@ -80,8 +84,8 @@ bool ChituService::dispatch(ESP3DMessage *message) {
 }
 
 bool ChituService::begin() {
+  _inDatagram=false;
   _udp.begin(3000);
-  _started = true;
   //
   // Analysis indicates that this payload is sent by an official Chitu ESP01 (Qidi X-Plus)
   // https://github.com/elfman03/ChituAnalyzer
@@ -97,6 +101,7 @@ bool ChituService::begin() {
     return false;
   }
   commandMode(true);
+  _started = true;
   return true;
 }
 
@@ -162,12 +167,20 @@ bool ChituService::sendFragment(const uint8_t *dataFrame, const size_t dataSize,
 }
 
 //
+// REFACTOR -- used by http upload mode
+//
+bool ChituService::sendGcodeFrame(const char *cmd) {
+  LOGMAGIC("sendGcodeFrame!!!\r\n");
+  return true;
+}
+
+//
 // Waits up for a second for a full line from Chitu and returns it in the provided buffer.  
 // returns bytes read or zero in case of timeout or overflow.
 //
 int ChituService::pullChituLine(char *obuf, int max) {
   //
-  // Wait up to a second for a response.  response ends with newline
+  // Wait up to two seconds for a response.  response ends with newline
   //
   uint8_t ser=esp3d_serial_service.serialIndex();
   uint32_t t1=millis();
@@ -179,7 +192,7 @@ int ChituService::pullChituLine(char *obuf, int max) {
   //
   for(olen=0;olen<max && !newline;olen++) {
     while(!Serials[ser]->available()) {
-      ESP3DHal::wait(1);
+      ESP3DHal::wait(5);
       if((millis()-t1)>2000) {
         LOGMAGIC("ERROR - CHITU SERIAL GCODE ... NO RESPONSE COMPLETION IN 2s\r\n");
         LOGMAGIC(obuf,olen);
@@ -218,6 +231,9 @@ int ChituService::pullChituLine(char *obuf, int max) {
   return olen;
 }
 
+//
+// Send the GCode response off where it belongs.  Either to the Chitu HB via datagram or to the ESP3D message manager
+//
 void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int port) {
   if(port) {
     //
@@ -251,6 +267,9 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int 
   }
 }
 
+//
+// Handle a Gcode request to the printer giving reasonable change for the printer to respond
+//
 void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int port) {
   char obuf[256];
   char ctmp[128];
@@ -320,6 +339,7 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
     sendResponseHome(paystart, paylen, ip, port);
     sprintf(ctmp,"OK,SEND DONE\r\n");
     esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+    esp3d_serial_service.flush();
     //
     // Is this the last expected line in this series?
     //
@@ -327,6 +347,9 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
   }
 }
 
+//
+// Handle unsolicited traffic coming from the Chitu printer via serial
+//
 void ChituService::doChituMessage(const char *msg, size_t len) {
   char ctmp[256];
 
@@ -393,6 +416,7 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
     LOGMAGIC("\r\n");
 #endif
     esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+    esp3d_serial_service.flush();
   } else {
     LOGMAGIC("UNKNOWN REQUEST!!!!!  IGNORE!!!\r\n");
     LOGMAGIC(msg,len);
@@ -401,7 +425,10 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
   return;
 }
 
-void ChituService::doDatagram(const char*buf, int sz, IPAddress srcIp, int srcPort) {
+//
+// Handle Chitu HB incoming datagram.  It is either a special request handled by the ESP or gcode
+//
+void ChituService::doDatagram(char*buf, int sz, IPAddress srcIp, int srcPort) {
   char ctmp[128];
   ctmp[0]=0;
   //
@@ -455,32 +482,32 @@ void ChituService::doDatagram(const char*buf, int sz, IPAddress srcIp, int srcPo
   }
 }
 
-//
-// REFACTOR -- used by http upload mode
-//
-bool ChituService::sendGcodeFrame(const char *cmd) {
-  LOGMAGIC("sendGcodeFrame!!!\r\n");
-  return true;
-}
-
 void ChituService::handle() {
+  //
+  // For now receive datagrams from Chitu HB.  May add more later
+  //
   char buf[1460];
   int rct,avail;
-  if (_started) {
-     avail=_udp.parsePacket();
-     if(avail) {
+  //
+  // dont try to process before we are started
+  // dont try to process another if we are alreay handling one
+  //
+  if (_started && !_inDatagram) {
+     while(avail=_udp.parsePacket()) {
+       _inDatagram=true;
        IPAddress remoteIp=_udp.remoteIP();
        int remotePort=_udp.remotePort();
        rct=_udp.read(buf,1450);
 #ifdef SUPER_CHATTY
        char ctmp[128];
-       sprintf(ctmp,"CHITU RECEIVED datagram size %d:",rct);
+       sprintf(ctmp,"CHITU RECEIVED datagram size %d [no trailing newlines]:",rct);
        LOGMAGIC(ctmp);
        LOGMAGIC(buf,rct);
        LOGMAGIC("\r\n");
 #endif
        buf[rct]=0;
        doDatagram(buf,rct,remoteIp,remotePort);
+       _inDatagram=false;
      }
   }
 }
@@ -488,6 +515,7 @@ void ChituService::handle() {
 void ChituService::end() { 
   _started = false; 
   _udp.stop();
+  _inDatagram=false;
 }
 
 #endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
