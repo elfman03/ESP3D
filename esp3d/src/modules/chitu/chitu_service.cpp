@@ -39,6 +39,8 @@
 #define CHITU_INIT_BAUD_RATE 115200
 #define CHITU_POSTINIT_BAUD_RATE 2250000
 
+//#define SUPER_CHATTY 1
+
 extern HardwareSerial *Serials[];
 
 bool ChituService::_started = false;
@@ -178,8 +180,10 @@ int ChituService::pullChituLine(char *obuf, int max) {
   for(olen=0;olen<max && !newline;olen++) {
     while(!Serials[ser]->available()) {
       ESP3DHal::wait(1);
-      if((millis()-t1)>1000) {
-        LOGMAGIC("ERROR - CHITU SERIAL GCODE ... NO RESPONSE COMPLETION IN 1s\r\n");
+      if((millis()-t1)>2000) {
+        LOGMAGIC("ERROR - CHITU SERIAL GCODE ... NO RESPONSE COMPLETION IN 2s\r\n");
+        LOGMAGIC(obuf,olen);
+        LOGMAGIC("\r\n");
         obuf[0]=0;
         return 0;
       }
@@ -194,6 +198,8 @@ int ChituService::pullChituLine(char *obuf, int max) {
   //
   if(olen==max) {
     LOGMAGIC("ERROR - CHITU SERIAL GCODE OVERFLOW...\r\n");
+    LOGMAGIC(obuf,max);
+    LOGMAGIC("\r\n");
     obuf[0]=0;
     return 0;
   }
@@ -203,9 +209,11 @@ int ChituService::pullChituLine(char *obuf, int max) {
   //
   char ctmp[32];
   sprintf(ctmp,"CHITU OUTPUT (%d)\r\n",olen);
+#ifdef SUPER_CHATTY
   LOGMAGIC(ctmp);
   LOGMAGIC(obuf,olen);
   LOGMAGIC("\r\n");
+#endif
   //
   return olen;
 }
@@ -215,8 +223,10 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int 
     //
     // datagram GCode.  Send out as a datagram
     //
+#ifdef SUPER_CHATTY
     LOGMAGIC("CHITU RESPONSE TO UDP GUEST\r\n");
     LOGMAGIC(buf,len);
+#endif
     _udp.beginPacket(ip,port);
     _udp.write(buf,len);
     _udp.endPacket();
@@ -228,9 +238,11 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int 
     if(message) {
       message->type=ESP3DMessageType::unique;
       esp3d_commands.process(message);
+#ifdef SUPER_CHATTY
       LOGMAGIC("PROCESSED OUTGOING PAYLOAD: ");
       LOGMAGIC(buf,len);
       LOGMAGIC("\r\n");
+#endif
     } else {
       LOGMAGIC("COULD NOT CREATE ESP3D MESSAGE FROM PAYLOAD: ");
       LOGMAGIC(buf,len);
@@ -245,9 +257,11 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
   int olen;
   bool okfound=false;
 
+#ifdef SUPER_CHATTY
   LOGMAGIC("Gcode request: ");
   LOGMAGIC(msg,len);
   LOGMAGIC("\r\n");
+#endif
 
   //
   // Send to Chitu (a) +IPD header, (b) payload, (c) trailer
@@ -272,10 +286,12 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
     // Verify we got a cipsend or bail.
     //
     if(obuf!=strstr(obuf,"AT+CIPSEND=4,")) {
-      sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND (%d)\r\n",olen);
+      sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND len=%d olen=%d\r\n--",len,olen);
       LOGMAGIC(ctmp);
-      LOGMAGIC(obuf);
-      LOGMAGIC("\r\n");
+      LOGMAGIC(msg,len);
+      LOGMAGIC("--\r\n--");
+      LOGMAGIC(obuf,olen);
+      LOGMAGIC("--\r\n");
       return;
     }
     // extract the payload length
@@ -286,12 +302,19 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
     // Sanity check log messages
     if(!paystart) { 
       LOGMAGIC("ERROR - CHITU CANNOT DETECT PAYLOAD START\r\n"); 
+      LOGMAGIC(msg,len);
+      LOGMAGIC("\r\n");
+      LOGMAGIC(obuf,olen);
+      LOGMAGIC("\r\n");
       return;
     }
     int expected=paylen+int(paystart-obuf);
     if(expected!=olen) { 
       sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-msg));
       LOGMAGIC(ctmp);
+      LOGMAGIC(msg,len);
+      LOGMAGIC("\r\n");
+      LOGMAGIC(obuf,olen);
       return;
     }
     sendResponseHome(paystart, paylen, ip, port);
@@ -307,15 +330,18 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
 void ChituService::doChituMessage(const char *msg, size_t len) {
   char ctmp[256];
 
+#ifdef SUPER_CHATTY
   LOGMAGIC("Chitu request: ");
   LOGMAGIC(msg,len);
   LOGMAGIC("\r\n");
-  ctmp[0]=0;
+#endif
 
+  ctmp[0]=0;
   if(msg==strstr(msg,"AT+CIPSEND=4,")) {
-    LOGMAGIC("ERROR - IGNORE UNSOLICITED CHITU CIPSEND...: ");
+    LOGMAGIC("ERROR - DROP UNSOLICITED CHITU CIPSEND...: ");
     LOGMAGIC(msg,len);
     LOGMAGIC("\r\n");
+    sprintf(ctmp,"OK,SEND DONE\r\n");
   } else if(msg==strstr(msg,"AT+GMR\r\n")) {
     //
     // Handle AT+GMR request
@@ -361,23 +387,47 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
   // If we have built up a response write it out.
   //
   if(ctmp[0]) {
+#ifdef SUPER_CHATTY
     LOGMAGIC("RESPONSE: ");
     LOGMAGIC(ctmp);
     LOGMAGIC("\r\n");
+#endif
     esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
   } else {
     LOGMAGIC("UNKNOWN REQUEST!!!!!  IGNORE!!!\r\n");
+    LOGMAGIC(msg,len);
+    LOGMAGIC("\r\n");
   }
   return;
 }
 
 void ChituService::doDatagram(const char*buf, int sz, IPAddress srcIp, int srcPort) {
   char ctmp[128];
+  ctmp[0]=0;
   //
   // Primordial message from client multicasts a M99999.  Respond with contact info
   // Format determined from wireshark of communication between ChituHB and actual Chitu ESP01
   //
-  if(sz==6 && strstr(buf,"M99999")) {
+  // ChituHB seems to have some extra special commands as well including
+  // V102&102& - requests AP mode SSID and password
+  // V103&103& - requests Station mode SSID and password
+  // 
+  // There are others for setting the AP/STA details and renaming the device but we will probably not provide those
+  // since the UI can be used
+  //
+  if(sz==9 && strstr(buf,"U102&102&")) {
+    sprintf(ctmp,"ok SSID:[SEE UI] PWD:[SEE UI] \r\n");
+#ifdef SUPER_CHATTY
+    LOGMAGIC("Respond to U102&102&: ");
+    LOGMAGIC(ctmp);
+#endif
+  } else if(sz==9 && strstr(buf,"U103&103&")) {
+    sprintf(ctmp,"ok SSID:[SEE UI] PWD:[SEE UI] \r\n");
+#ifdef SUPER_CHATTY
+    LOGMAGIC("Respond to U103&103&: ");
+    LOGMAGIC(ctmp);
+#endif
+  } else if(sz==6 && strstr(buf,"M99999")) {
     //
     // extract local IP and MAC
     //
@@ -388,10 +438,14 @@ void ChituService::doDatagram(const char*buf, int sz, IPAddress srcIp, int srcPo
     // build the payload packet
     //
     sprintf(ctmp,"ok MAC:%02x:%02x:%02x:%02x:%02x:%02x IP:%d.%d.%d.%d VER:%s ID:00,00,00,00,00,00,00,00 NAME:%s\r\n",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0],staip[0],staip[1],staip[2],staip[3],FW_VERSION,"ESP3d-3ce");
+#ifdef SUPER_CHATTY
     LOGMAGIC("Respond to M99999: ");
     LOGMAGIC(ctmp);
+#endif
+  }
+  if(ctmp[0]) {
     //
-    // send payload packet
+    // send special payload packet
     //
     _udp.beginPacket(srcIp,srcPort);
     _udp.write(ctmp);
@@ -410,19 +464,21 @@ bool ChituService::sendGcodeFrame(const char *cmd) {
 }
 
 void ChituService::handle() {
-  char buf[1450];
+  char buf[1460];
   int rct,avail;
   if (_started) {
      avail=_udp.parsePacket();
      if(avail) {
-       char ctmp[128];
        IPAddress remoteIp=_udp.remoteIP();
        int remotePort=_udp.remotePort();
        rct=_udp.read(buf,1450);
+#ifdef SUPER_CHATTY
+       char ctmp[128];
        sprintf(ctmp,"CHITU RECEIVED datagram size %d:",rct);
        LOGMAGIC(ctmp);
        LOGMAGIC(buf,rct);
        LOGMAGIC("\r\n");
+#endif
        buf[rct]=0;
        doDatagram(buf,rct,remoteIp,remotePort);
      }
