@@ -323,6 +323,9 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
   // CIPSEND ... Chitu IP Send?
   // AT+CIPSEND=4,<SIZE>\r<PAYLOAD>
   // incoming message length should equal the size plus the header bit up to the \r
+  // NOTEs:
+  //    All found Chitu responses end with a CIPSEND line that starts with "ok"
+  //    At least 1 CIPSEND response includes a \r\n in the payload (M29 response) so have to handle multiline payloads
   //
   //
   while(!okfound) {
