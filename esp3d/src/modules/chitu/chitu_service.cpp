@@ -48,42 +48,68 @@ uint8_t ChituService::_uploadStatus = UNKNOW_STATE;
 bool ChituService::_uploadMode = false;
 bool ChituService::_inDatagram = false;
 WiFiUDP ChituService::_udp;
+unsigned int ChituService::_epoch = 0;
+bool ChituService::_locked = false;
 
 //
 // Message bus message coming in from the esp3d core
 //
 bool ChituService::dispatch(ESP3DMessage *message) {
   char ctmp[128];
+  bool ret=false;
+  bool done=false;
+
+  if(!lock()) {
+    LOGMAGIC("ChituService::dispatch fail to acquire lock.\r\n");
+    return false;
+  }
+
   //
   // sanity to avoid responding when impossible
   //
   if (!message || !_started) {
-    return false;
+    ret=false; done=true;
   }
+
   //
   // If message originates from chitu serial
   //
-  if(message->origin==ESP3DClientType::serial) {
+  if(!done && message->origin==ESP3DClientType::serial) {
     doChituMessage((const char*)message->data,message->size);
     esp3d_message_manager.deleteMsg(message);
-    return true;
+    ret=true; done=true;
   }
-  if(message->origin==ESP3DClientType::http) {
+  if(!done && message->origin==ESP3DClientType::http) {
     doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0);
     esp3d_message_manager.deleteMsg(message);
-    return true;
+    ret=true; done=true;
+  }
+  if(!done && message->origin==ESP3DClientType::telnet) {
+    sprintf(ctmp,"telnet dispatch len=%d:",message->size);
+    LOGMAGIC(ctmp);
+    LOGMAGIC((const char*)message->data,message->size);
+    LOGMAGIC("\r\n");
+    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0);
+    esp3d_message_manager.deleteMsg(message);
+    ret=true; done=true;
   }
   //
   // Message originates from unhandled direction
   //
-  sprintf(ctmp,"chitu dispatch: origin=%d .. ignore...: ",message->origin);
-  LOGMAGIC(ctmp);
-  LOGMAGIC((const char*)message->data,message->size);
-  LOGMAGIC("\r\n");
-  return false;
+  if(!done) {
+    sprintf(ctmp,"chitu dispatch: origin=%d .. ignore...: ",message->origin);
+    LOGMAGIC(ctmp);
+    LOGMAGIC((const char*)message->data,message->size);
+    LOGMAGIC("\r\n");
+    ret=false; done=true;
+  }
+
+  unlock();
+  return ret;
 }
 
 bool ChituService::begin() {
+  unlock();  // intentionally unpaired unlock
   _inDatagram=false;
   _udp.begin(3000);
   //
@@ -300,50 +326,75 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
   //
   //
   while(!okfound) {
-    olen=ChituService::pullChituLine(obuf, 255);
-    //
-    // Verify we got a cipsend or bail.
-    //
-    if(obuf!=strstr(obuf,"AT+CIPSEND=4,")) {
-      sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND len=%d olen=%d\r\n--",len,olen);
-      LOGMAGIC(ctmp);
-      LOGMAGIC(msg,len);
-      LOGMAGIC("--\r\n--");
-      LOGMAGIC(obuf,olen);
-      LOGMAGIC("--\r\n");
-      return;
+    int offset=0;
+    for(bool completeCIP=false;!completeCIP;) {
+      olen=ChituService::pullChituLine(&obuf[offset], 255-offset);
+      if(offset) {
+#ifdef SUPER_CHATTY
+        sprintf(ctmp,"assemble multiline cipsend progress... offset=%d + olen=%d = %d\r\n--",offset,olen,offset+olen);
+        LOGMAGIC(ctmp);
+        LOGMAGIC(obuf,olen+offset);
+#endif
+        olen+=offset;  // if this is a line with multiple \r\n from chitu, assemble them
+      }
+      //
+      // Verify we got a cipsend or bail.
+      //
+      if(obuf!=strstr(obuf,"AT+CIPSEND=4,")) {
+        sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND len=%d olen=%d\r\n--",len,olen);
+        LOGMAGIC(ctmp);
+        LOGMAGIC(msg,len);
+        LOGMAGIC("--\r\n--");
+        LOGMAGIC(obuf,olen);
+        LOGMAGIC("--\r\n");
+        return;
+      }
+      // extract the payload length
+      int paylen=atoi(&obuf[13]);
+      // determine the payload start
+      char *paystart=strchr(obuf,'\r');
+      if(paystart) { paystart++; }
+      // Sanity check log messages
+      if(!paystart) { 
+        LOGMAGIC("ERROR - CHITU CANNOT DETECT PAYLOAD START\r\n"); 
+        LOGMAGIC(msg,len);
+        LOGMAGIC("\r\n");
+        LOGMAGIC(obuf,olen);
+        LOGMAGIC("\r\n");
+        return;
+      }
+      int expected=paylen+int(paystart-obuf);
+      if(expected==olen) { 
+	completeCIP=true; 
+      } else if(expected>olen) {
+#ifdef SUPER_CHATTY
+        sprintf(ctmp,"WARN insufficient CIPSEND bytes (%d).  pull another line.\r\n--",olen);
+        LOGMAGIC(ctmp);
+        LOGMAGIC("--\r\n--");
+        LOGMAGIC(obuf);
+        LOGMAGIC("--\r\n");
+#endif
+        offset=olen;
+        completeCIP=false;
+      } else {
+        sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-obuf));
+        LOGMAGIC(ctmp);
+        LOGMAGIC(msg,len);
+        LOGMAGIC("\r\n");
+        LOGMAGIC(obuf,olen);
+        return;
+      }
+      if(completeCIP) {
+        sendResponseHome(paystart, paylen, ip, port);
+        sprintf(ctmp,"OK,SEND DONE\r\n");
+        esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
+        esp3d_serial_service.flush();
+        //
+        // Is this the last expected line in this series?
+        //
+        if(paylen>2 && paystart[0]=='o' && paystart[1]=='k') { okfound=true; }
+      }
     }
-    // extract the payload length
-    int paylen=atoi(&obuf[13]);
-    // determine the payload start
-    char *paystart=strchr(obuf,'\r');
-    if(paystart) { paystart++; }
-    // Sanity check log messages
-    if(!paystart) { 
-      LOGMAGIC("ERROR - CHITU CANNOT DETECT PAYLOAD START\r\n"); 
-      LOGMAGIC(msg,len);
-      LOGMAGIC("\r\n");
-      LOGMAGIC(obuf,olen);
-      LOGMAGIC("\r\n");
-      return;
-    }
-    int expected=paylen+int(paystart-obuf);
-    if(expected!=olen) { 
-      sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-msg));
-      LOGMAGIC(ctmp);
-      LOGMAGIC(msg,len);
-      LOGMAGIC("\r\n");
-      LOGMAGIC(obuf,olen);
-      return;
-    }
-    sendResponseHome(paystart, paylen, ip, port);
-    sprintf(ctmp,"OK,SEND DONE\r\n");
-    esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
-    esp3d_serial_service.flush();
-    //
-    // Is this the last expected line in this series?
-    //
-    if(paylen>2 && paystart[0]=='o' && paystart[1]=='k') { okfound=true; }
   }
 }
 
@@ -482,12 +533,54 @@ void ChituService::doDatagram(char*buf, int sz, IPAddress srcIp, int srcPort) {
   }
 }
 
+bool ChituService::lock() {
+  bool success;
+  if(!_locked) {       // if not locked try to take out a lock
+    noInterrupts();
+    if(!_locked) {     // we are the locker
+      success=true; 
+      _locked=true; 
+    } else {
+      success=false;  // someone else locked before us
+    }
+    interrupts();
+  } else {             // already locked
+    success=false; 
+  }
+  return success;
+}
+
+bool ChituService::unlock() {
+  bool success;
+  if(_locked) {        // if locked try to release it
+    noInterrupts();
+    if(_locked) {      // we are the unlocker
+      success=true; 
+      _locked=false; 
+    } else {           // someone else unlocked before us
+      success=false;
+    }
+    interrupts();
+  } else {
+    success=false;     // already unlocked
+  }
+  return success;
+}
+
 void ChituService::handle() {
   //
   // For now receive datagrams from Chitu HB.  May add more later
   //
   char buf[1460];
   int rct,avail;
+
+  //
+  // If we cannot enter locked state skip this datagram cycle
+  //
+  if(!lock()) {
+    LOGMAGIC("ChituService::handle fail to acquire lock.\r\n");
+    return;
+  }
   //
   // dont try to process before we are started
   // dont try to process another if we are alreay handling one
@@ -510,12 +603,17 @@ void ChituService::handle() {
        _inDatagram=false;
      }
   }
+  //
+  // release the lock
+  //
+  unlock();
 }
 
 void ChituService::end() { 
   _started = false; 
   _udp.stop();
   _inDatagram=false;
+  unlock();   // Intentionally unpaired unlock.
 }
 
 #endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
