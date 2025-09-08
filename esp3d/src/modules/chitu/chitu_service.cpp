@@ -404,6 +404,14 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, 
         return;
       }
       if(completeCIP) {
+	//
+	// Some clients (looking at Prusa slicer want a newline after the ok and before the rest of the line (noted on M105)
+	// seems to work okay for other clients so replace the space with a newline...
+	//
+	if(toType==ESP3DClientType::telnet && paystart[0]=='o' && paystart[1]=='k' && paystart[2]==' ') {
+	  paystart[2]='\n';
+	}
+
         sendResponseHome(paystart, paylen, udpIP, udpPort, toType);
         sprintf(ctmp,"OK,SEND DONE\r\n");
         esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
