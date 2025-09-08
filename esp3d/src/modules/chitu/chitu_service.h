@@ -51,12 +51,14 @@ class ChituService {
   static void doDatagram(char* buf, int sz, IPAddress srcIp, int srcPort);
   static bool lock();
   static bool unlock();
+  static void resetLockTimeout(uint32_t t);
   static bool _started;
   static bool _inDatagram;
   static WiFiUDP _udp;
   static bool _uploadMode;
   static unsigned int _epoch;
   static bool _locked;
+  static uint32_t _lockTs;
 };
 
 #endif  //_CHITU_SERVICES_H

@@ -36,8 +36,18 @@
 #define ERROR_STATE 0x1
 #define SUCCESS_STATE 0x2
 
+// ESP01 starts at 115200
 #define CHITU_INIT_BAUD_RATE 115200
+
+// Qidi XPlus gen1 pushes baud to 2250000
 #define CHITU_POSTINIT_BAUD_RATE 2250000
+
+// dont hold lock for more than 2s
+#define MAXLOCK 2000
+// How long to wait for bytes from Chitu before giving up.  
+// NOTE: if keep pressing refresh file listing on ChituHB while doing info 
+// checkbox in the background 1s is not enough.  Settling on 2s for now
+#define MAX_SERIAL_WAIT 2000
 
 //#define SUPER_CHATTY 1
 
@@ -50,6 +60,7 @@ bool ChituService::_inDatagram = false;
 WiFiUDP ChituService::_udp;
 unsigned int ChituService::_epoch = 0;
 bool ChituService::_locked = false;
+uint32_t ChituService::_lockTs = 0;
 
 //
 // Message bus message coming in from the esp3d core
@@ -201,13 +212,12 @@ bool ChituService::sendGcodeFrame(const char *cmd) {
 }
 
 //
-// Waits up for a second for a full line from Chitu and returns it in the provided buffer.  
+// Waits up to MAX_SERIAL_WAIT for a full line from Chitu and returns it in the provided buffer.  
 // returns bytes read or zero in case of timeout or overflow.
+// NOTE:
+//   * response ends with \n
 //
 int ChituService::pullChituLine(char *obuf, int max) {
-  //
-  // Wait up to two seconds for a response.  response ends with newline
-  //
   uint8_t ser=esp3d_serial_service.serialIndex();
   uint32_t t1=millis();
   obuf[0]=0;
@@ -219,8 +229,12 @@ int ChituService::pullChituLine(char *obuf, int max) {
   for(olen=0;olen<max && !newline;olen++) {
     while(!Serials[ser]->available()) {
       ESP3DHal::wait(5);
-      if((millis()-t1)>2000) {
-        LOGMAGIC("ERROR - CHITU SERIAL GCODE ... NO RESPONSE COMPLETION IN 2s\r\n");
+      uint32_t now=millis();
+
+      resetLockTimeout(now);  // we might be pulling lines for a while. Reset the lock timeout as needed
+
+      if((now-t1)>MAX_SERIAL_WAIT) {
+        LOGMAGIC("ERROR - CHITU SERIAL GCODE ... NO RESPONSE COMPLETION IN MAX_SERIAL_WAIT\r\n");
         LOGMAGIC(obuf,olen);
         LOGMAGIC("\r\n");
         obuf[0]=0;
@@ -536,13 +550,44 @@ void ChituService::doDatagram(char*buf, int sz, IPAddress srcIp, int srcPort) {
   }
 }
 
+//
+// reset the lock forward progress timestamp if want to hold for possibly longer time
+// NOTE: reader of _lockTS is not protected by noInterrupts.  I believe this is okay
+// on a single core ESP8266.
+//
+void ChituService::resetLockTimeout(uint32_t t) {
+  noInterrupts();
+  _lockTs=t;
+  interrupts();
+}
+
 bool ChituService::lock() {
   bool success;
+  uint32_t now=millis();
+
+  //
+  // Handle lock that has been locked more than designated time
+  //
+  if(_locked && ((now-_lockTs) > MAXLOCK)) {
+    noInterrupts();
+    //
+    // repetitive check but this time inside of a noInterrupts block to be pedantic
+    // intentionally unpaired unlock
+    //
+    if(_locked && ((now-_lockTs) > MAXLOCK)) { unlock(); }
+    interrupts();
+    LOGMAGIC("WARN - FORCE UNLOCK HUNG LOCK\r\n");
+  }
+  //
+  // Proceed with new locking path
+  //
   if(!_locked) {       // if not locked try to take out a lock
     noInterrupts();
+    // repetitive but this time inside of a noInterrupts context
     if(!_locked) {     // we are the locker
       success=true; 
       _locked=true; 
+      _lockTs=now;
     } else {
       success=false;  // someone else locked before us
     }
@@ -557,9 +602,11 @@ bool ChituService::unlock() {
   bool success;
   if(_locked) {        // if locked try to release it
     noInterrupts();
+    // repetitive but this time inside of a noInterrupts context
     if(_locked) {      // we are the unlocker
       success=true; 
       _locked=false; 
+      _lockTs=0;
     } else {           // someone else unlocked before us
       success=false;
     }
