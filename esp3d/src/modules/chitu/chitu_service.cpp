@@ -91,7 +91,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
     ret=true; done=true;
   }
   if(!done && message->origin==ESP3DClientType::http) {
-    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0);
+    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0,ESP3DClientType::webui_websocket);
     esp3d_message_manager.deleteMsg(message);
     ret=true; done=true;
   }
@@ -100,7 +100,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
     LOGMAGIC(ctmp);
     LOGMAGIC((const char*)message->data,message->size);
     LOGMAGIC("\r\n");
-    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0);
+    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0,ESP3DClientType::telnet);
     esp3d_message_manager.deleteMsg(message);
     ret=true; done=true;
   }
@@ -274,8 +274,8 @@ int ChituService::pullChituLine(char *obuf, int max) {
 //
 // Send the GCode response off where it belongs.  Either to the Chitu HB via datagram or to the ESP3D message manager
 //
-void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int port) {
-  if(port) {
+void ChituService::sendResponseHome(const char *buf, int len, IPAddress udpIP, int udpPort, ESP3DClientType toType) {
+  if(udpPort) {
     //
     // datagram GCode.  Send out as a datagram
     //
@@ -283,19 +283,21 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int 
     LOGMAGIC("CHITU RESPONSE TO UDP GUEST\r\n");
     LOGMAGIC(buf,len);
 #endif
-    _udp.beginPacket(ip,port);
+    _udp.beginPacket(udpIP,udpPort);
     _udp.write(buf,len);
     _udp.endPacket();
   } else {
     //
     // Send the payload where it belongs (based on ESP3DSerialService::flushData for now)
     //
-    ESP3DMessage *message=esp3d_message_manager.newMsg(ESP3DClientType::chitu_serial,ESP3DClientType::all_clients,(uint8_t*)buf,len,ESP3DAuthenticationLevel::admin);
+    ESP3DMessage *message=esp3d_message_manager.newMsg(ESP3DClientType::chitu_serial,toType,(uint8_t*)buf,len,ESP3DAuthenticationLevel::admin);
     if(message) {
       message->type=ESP3DMessageType::unique;
       esp3d_commands.process(message);
 #ifdef SUPER_CHATTY
-      LOGMAGIC("PROCESSED OUTGOING PAYLOAD: ");
+      char ctmp[128];
+      sprintf(ctmp,"PROCESSED OUTGOING PAYLOAD TO dst=%d: ",toType);
+      LOGMAGIC(ctmp);
       LOGMAGIC(buf,len);
       LOGMAGIC("\r\n");
 #endif
@@ -310,7 +312,7 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress ip, int 
 //
 // Handle a Gcode request to the printer giving reasonable change for the printer to respond
 //
-void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int port) {
+void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, int udpPort, ESP3DClientType toType) {
   char obuf[256];
   char ctmp[128];
   int olen;
@@ -402,7 +404,7 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress ip, int
         return;
       }
       if(completeCIP) {
-        sendResponseHome(paystart, paylen, ip, port);
+        sendResponseHome(paystart, paylen, udpIP, udpPort, toType);
         sprintf(ctmp,"OK,SEND DONE\r\n");
         esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
         esp3d_serial_service.flush();
@@ -496,7 +498,7 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
 //
 // Handle Chitu HB incoming datagram.  It is either a special request handled by the ESP or gcode
 //
-void ChituService::doDatagram(char*buf, int sz, IPAddress srcIp, int srcPort) {
+void ChituService::doDatagram(char*buf, int sz, IPAddress udpIP, int udpPort) {
   char ctmp[128];
   ctmp[0]=0;
   //
@@ -542,11 +544,12 @@ void ChituService::doDatagram(char*buf, int sz, IPAddress srcIp, int srcPort) {
     //
     // send special payload packet
     //
-    _udp.beginPacket(srcIp,srcPort);
-    _udp.write(ctmp);
-    _udp.endPacket();
+    //_udp.beginPacket(udpIP,udpPort);
+    //_udp.write(ctmp);
+    //_udp.endPacket();
+    sendResponseHome(ctmp, strlen(ctmp), udpIP, udpPort, ESP3DClientType::no_client);
   } else {
-    doGcodeMessage(buf,sz,srcIp,srcPort);
+    doGcodeMessage(buf,sz,udpIP,udpPort,ESP3DClientType::no_client);
   }
 }
 
