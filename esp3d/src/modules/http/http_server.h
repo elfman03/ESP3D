@@ -96,8 +96,8 @@ class HTTP_Server {
   static void handleMKSUpload();
 #endif  // COMMUNICATION_PROTOCOL == MKS_SERIAL
 #if COMMUNICATION_PROTOCOL == CHITU_SERIAL
-  static void ChituFileupload();
-  static void handleChituUpload();
+  static void chituFileuploadFN();
+  static void chituFileuploadUFN();
 #endif  // COMMUNICATION_PROTOCOL == CHITU_SERIAL
 };
 

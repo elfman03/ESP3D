@@ -28,23 +28,28 @@
 #include <ESP8266WebServer.h>
 #endif  // ARDUINO_ARCH_ESP8266
 #include "../../authentication/authentication_service.h"
-#include "../../mks/mks_service.h"
+#include "../../chitu/chitu_service.h"
+#include "../../logmagic/logmagic_server.h"
 
 void HTTP_Server::handleChituUpload() {
+LOGMAGIC("start handleChituUpload()\r\n");
   ESP3DAuthenticationLevel auth_level =
       AuthenticationService::getAuthenticatedLevel();
   if (auth_level == ESP3DAuthenticationLevel::guest) {
+LOGMAGIC("guest auth error\r\n");
     _upload_status = UPLOAD_STATUS_NONE;
     _webserver->send(401, "text/plain", "Wrong authentication!");
     return;
   }
   if ((_upload_status == UPLOAD_STATUS_FAILED) ||
       (_upload_status == UPLOAD_STATUS_CANCELLED)) {
+LOGMAGIC("cancel fail error\r\n");
     _webserver->send(500, "text/plain", "Upload failed!");
     _upload_status = UPLOAD_STATUS_NONE;
     return;
   }
   // no error
+LOGMAGIC("success\r\n");
   _webserver->send(200, "text/plain", "{\"status\":\"ok\"}");
   _upload_status = UPLOAD_STATUS_NONE;
 }
