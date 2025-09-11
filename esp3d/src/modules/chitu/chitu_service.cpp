@@ -121,6 +121,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
 
 bool ChituService::begin() {
   unlock();  // intentionally unpaired unlock
+  _uploadMode = false;
   _inDatagram=false;
   _udp.begin(3000);
   //
@@ -137,50 +138,13 @@ bool ChituService::begin() {
     esp3d_log("ChituService Begin Message Failure");
     return false;
   }
-  commandMode(true);
+  esp3d_serial_service.updateBaudRate(CHITU_POSTINIT_BAUD_RATE);
   _started = true;
   return true;
 }
 
 //
-// used by http upload mode
-//
-void ChituService::commandMode(bool fromSettings) {
-  //if (fromSettings) {
-  //  _commandBaudRate = ESP3DSettings::readUint32(ESP_BAUD_RATE);
-  //}
-  esp3d_log("Cmd Mode");
-  LOGMAGIC("CHITU -- Cmd Mode\r\n");
-  _uploadMode = false;
-  esp3d_serial_service.updateBaudRate(CHITU_POSTINIT_BAUD_RATE);
-}
-//
-// REFACTOR -- used by http upload mode
-//
-//void ChituService::uploadMode() {
-//  esp3d_log("Upload Mode");
-//  LOGMAGIC("CHITU -- Upload Mode\r\n");
-//  _uploadMode = true;
-//  //esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
-//}
-
-//
-// REFACTOR -- used by http upload mode
-//
-//uint ChituService::getFragmentID(uint32_t fragmentNumber, bool isLast) {
-//  LOGMAGIC("getFragmentID\r\n");
-//  esp3d_log("Fragment: %d %s", fragmentNumber, isLast ? " is last" : "");
-//  if (isLast) {
-//    fragmentNumber |= (1 << 31);
-//  } else {
-//    fragmentNumber &= ~(1 << 31);
-//  }
-//  esp3d_log("Fragment is now: %d", fragmentNumber);
-//  return fragmentNumber;
-//}
-
-//
-// used by http upload mode
+// used by http upload mode... upload is beginning for a named file
 //
 bool ChituService::uploadBegin(const char *filename, size_t filesize) {
   char ctmp[128];
@@ -190,7 +154,8 @@ bool ChituService::uploadBegin(const char *filename, size_t filesize) {
 }
 
 //
-// used by http upload mode
+// used by http upload mode... a payload with an offset.  should be either
+// 2048 bytes or less for the final packet
 //
 bool ChituService::uploadMiddle(const char *buf, size_t offset, size_t len) {
   char ctmp[128];
@@ -200,7 +165,9 @@ bool ChituService::uploadMiddle(const char *buf, size_t offset, size_t len) {
 }
 
 //
-// used by http upload mode
+// used by http upload mode... Upload is complete and we need to report whether
+// or not it was successful.  Also.  the incoming boolean indicates if we should
+// start the print of the newly uploaded file.
 //
 bool ChituService::uploadEnd(bool printit) {
   if(printit) {
@@ -208,14 +175,6 @@ bool ChituService::uploadEnd(bool printit) {
   } else {
     LOGMAGIC("uploadEnd noprint\r\n");
   }
-  return true;
-}
-
-//
-// REFACTOR -- used by http upload mode
-//
-bool ChituService::sendGcodeFrame(const char *cmd) {
-  LOGMAGIC("sendGcodeFrame!!!\r\n");
   return true;
 }
 

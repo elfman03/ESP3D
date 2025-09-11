@@ -31,18 +31,12 @@ class ChituService {
  public:
   static bool begin();
   static bool dispatch(ESP3DMessage* message);
-  static bool sendGcodeFrame(const char* cmd);
   static void handle();
   static void end();
   static bool started() { return _started; }
   static bool uploadBegin(const char* filename, size_t filesize);
   static bool uploadMiddle(const char* buf, size_t offset, size_t len);
   static bool uploadEnd(bool printit);
-  //static bool sendFragment(const uint8_t* dataFrame, const size_t dataSize,
-  //                         uint fragmentID);
-  //static uint getFragmentID(uint32_t fragmentNumber, bool isLast = false);
-  static void commandMode(bool fromSettings = false);
-  //static void uploadMode();
 
  private:
   static uint8_t _uploadStatus;
