@@ -157,49 +157,57 @@ void ChituService::commandMode(bool fromSettings) {
 //
 // REFACTOR -- used by http upload mode
 //
-void ChituService::uploadMode() {
-  esp3d_log("Upload Mode");
-  LOGMAGIC("CHITU -- Upload Mode\r\n");
-  _uploadMode = true;
-  //esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
-}
+//void ChituService::uploadMode() {
+//  esp3d_log("Upload Mode");
+//  LOGMAGIC("CHITU -- Upload Mode\r\n");
+//  _uploadMode = true;
+//  //esp3d_serial_service.updateBaudRate(UPLOAD_BAUD_RATE);
+//}
 
 //
 // REFACTOR -- used by http upload mode
 //
-uint ChituService::getFragmentID(uint32_t fragmentNumber, bool isLast) {
-  LOGMAGIC("getFragmentID\r\n");
-  esp3d_log("Fragment: %d %s", fragmentNumber, isLast ? " is last" : "");
-  if (isLast) {
-    fragmentNumber |= (1 << 31);
-  } else {
-    fragmentNumber &= ~(1 << 31);
-  }
-  esp3d_log("Fragment is now: %d", fragmentNumber);
-  return fragmentNumber;
-}
+//uint ChituService::getFragmentID(uint32_t fragmentNumber, bool isLast) {
+//  LOGMAGIC("getFragmentID\r\n");
+//  esp3d_log("Fragment: %d %s", fragmentNumber, isLast ? " is last" : "");
+//  if (isLast) {
+//    fragmentNumber |= (1 << 31);
+//  } else {
+//    fragmentNumber &= ~(1 << 31);
+//  }
+//  esp3d_log("Fragment is now: %d", fragmentNumber);
+//  return fragmentNumber;
+//}
 
 //
-// REFACTOR -- used by http upload mode
+// used by http upload mode
 //
-bool ChituService::sendFirstFragment(const char *filename, size_t filesize) {
-  uint fileNameLen = strlen(filename);
-  uint dataLen = fileNameLen + 5;
-  LOGMAGIC("sendFirstFragment\r\n");
-  esp3d_log("Filename: %s  Filesize: %d", filename, filesize);
-  esp3d_log("Ok");
+bool ChituService::uploadBegin(const char *filename, size_t filesize) {
+  char ctmp[128];
+  sprintf(ctmp,"uploadBegin fn=%s approx_size=%d\r\n",filename,filesize);
+  LOGMAGIC(ctmp);
   return true;
 }
 
 //
-// REFACTOR -- used by http upload mode
+// used by http upload mode
 //
-bool ChituService::sendFragment(const uint8_t *dataFrame, const size_t dataSize,
-                              uint fragmentID) {
-  uint dataLen = dataSize + 4;
-  esp3d_log("Fragment datalen:%d", dataSize);
-  LOGMAGIC("sendFragment\r\n");
-  esp3d_log("Ok");
+bool ChituService::uploadMiddle(const char *buf, size_t offset, size_t len) {
+  char ctmp[128];
+  sprintf(ctmp,"uploadMiddle offset=%d len=%d\r\n",offset,len);
+  LOGMAGIC(ctmp);
+  return true;
+}
+
+//
+// used by http upload mode
+//
+bool ChituService::uploadEnd(bool printit) {
+  if(printit) {
+    LOGMAGIC("uploadEnd print\r\n");
+  } else {
+    LOGMAGIC("uploadEnd noprint\r\n");
+  }
   return true;
 }
 

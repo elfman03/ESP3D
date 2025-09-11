@@ -35,12 +35,14 @@ class ChituService {
   static void handle();
   static void end();
   static bool started() { return _started; }
-  static bool sendFirstFragment(const char* filename, size_t filesize);
-  static bool sendFragment(const uint8_t* dataFrame, const size_t dataSize,
-                           uint fragmentID);
-  static uint getFragmentID(uint32_t fragmentNumber, bool isLast = false);
+  static bool uploadBegin(const char* filename, size_t filesize);
+  static bool uploadMiddle(const char* buf, size_t offset, size_t len);
+  static bool uploadEnd(bool printit);
+  //static bool sendFragment(const uint8_t* dataFrame, const size_t dataSize,
+  //                         uint fragmentID);
+  //static uint getFragmentID(uint32_t fragmentNumber, bool isLast = false);
   static void commandMode(bool fromSettings = false);
-  static void uploadMode();
+  //static void uploadMode();
 
  private:
   static uint8_t _uploadStatus;

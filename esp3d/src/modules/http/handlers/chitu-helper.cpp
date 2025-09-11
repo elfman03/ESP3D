@@ -1,6 +1,7 @@
 /*
  handle-chitu-files.cpp - ESP3D http handle
     based on handle-mks-files.cpp
+    restructure based on https://tttapa.github.io/ESP8266/Chap12%20-%20Uploading%20to%20Server.html
 
  Copyright (c) 2014 Luc Lebosse. All rights reserved.
 
@@ -27,31 +28,72 @@
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WebServer.h>
 #endif  // ARDUINO_ARCH_ESP8266
-#include "../../authentication/authentication_service.h"
 #include "../../chitu/chitu_service.h"
 #include "../../logmagic/logmagic_server.h"
 
-void HTTP_Server::handleChituUpload() {
-LOGMAGIC("start handleChituUpload()\r\n");
-  ESP3DAuthenticationLevel auth_level =
-      AuthenticationService::getAuthenticatedLevel();
-  if (auth_level == ESP3DAuthenticationLevel::guest) {
-LOGMAGIC("guest auth error\r\n");
-    _upload_status = UPLOAD_STATUS_NONE;
-    _webserver->send(401, "text/plain", "Wrong authentication!");
-    return;
-  }
-  if ((_upload_status == UPLOAD_STATUS_FAILED) ||
-      (_upload_status == UPLOAD_STATUS_CANCELLED)) {
-LOGMAGIC("cancel fail error\r\n");
-    _webserver->send(500, "text/plain", "Upload failed!");
-    _upload_status = UPLOAD_STATUS_NONE;
-    return;
-  }
-  // no error
-LOGMAGIC("success\r\n");
-  _webserver->send(200, "text/plain", "{\"status\":\"ok\"}");
-  _upload_status = UPLOAD_STATUS_NONE;
+// Pretend to be astrobox to support url api for uploading.  I wanted to use MKS form instead of astrobox but they do not 
+// use http form POST uploads and do not work with esp8266webserver upload mode.  Astrobox uses forms and thus works with 
+// esp8266webserver.  This is enough to be accepted by Prusa Slicer as an Astrobox for the purposes of uploading prints.
+// 
+#define ASTROBOX_VERSION "{\"api\": \"fake\", \"text\": \"AstroBox fake\"}"
+
+void HTTP_Server::chituFakeAstrobox() {
+  _webserver->send(200, "application/json", ASTROBOX_VERSION);
+  //char ctmp[128];
+  //sprintf(ctmp,"Impersonate Astrobox: %s\r\n",ASTROBOX_VERSION);
+  //LOGMAGIC(ctmp);
 }
 
+// Upload complete.  Send response based on result
+// As the Webserver class processes form fragments, it builds up the list of arguments.
+// Those arguments are then available to read at the end of the operation which is here.
+// Astrobox seems to populate a field labelled "print" to indicate if the result should
+// be printed after the upload completes.
+// 
+void HTTP_Server::chituUploadFN() {
+  bool success;
+  const char *print=_webserver->arg("print").c_str();
+  success=ChituService::uploadEnd(!strcmp(print,"true"));
+  if(success) {
+    _webserver->send(200, "text/plain", "Upload Complete");
+  } else {
+    _webserver->send(422, "text/plain", "Upload Failure");
+  }
+}
+
+// Upload Incremental callback
+//
+void HTTP_Server::chituUploadUFN() {
+  //
+  // get upload structure
+  //
+  HTTPUpload& upload = _webserver->upload();
+  if(upload.status == UPLOAD_FILE_START) {
+    //
+    // file upload is starting
+    //
+    char ftmp[128];
+    size_t fileSize=0;
+    sprintf(ftmp,"s%s",upload.filename.c_str());
+    if (_webserver->hasArg(ftmp)) {
+      fileSize = _webserver->arg(ftmp).toInt();
+    } else if (_webserver->hasHeader("Content-Length")) {
+      fileSize = _webserver->header("Content-Length").toInt();
+    }
+    ChituService::uploadBegin(upload.filename.c_str(),fileSize);
+  } else if(upload.status == UPLOAD_FILE_WRITE) {
+    //
+    // file upload payload (2048 bytes or less for the last payload)
+    //
+    ChituService::uploadMiddle((const char *)upload.buf,upload.totalSize,upload.currentSize);
+  } else if(upload.status == UPLOAD_FILE_END) {
+    //
+    // file upload ending.  we would have called the chitu end from here but
+    // we have to wait until the final callback in order to see the arguments like
+    // whether I should print or not.  So we just NOP at this point.
+    //
+  } else {
+    LOGMAGIC("ERROR: UPLOAD_FILE UNKNOWN STATE\r\n");
+  }
+}
 #endif  // HTTP_FEATURE && (COMMUNICATION_PROTOCOL == CHITU_SERIAL)
