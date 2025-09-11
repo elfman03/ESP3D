@@ -39,8 +39,8 @@ class ChituService {
   static bool uploadEnd(bool printit);
 
  private:
-  static uint8_t _uploadStatus;
-  static void doGcodeMessage(const char* msg, size_t len, IPAddress udpIP, int udpPort, ESP3DClientType toType);
+  static char _gcode_rbuf[256];
+  static const char *doGcodeMessage(const char* msg, size_t len, IPAddress udpIP, int udpPort, ESP3DClientType toType);
   static void sendResponseHome(const char* buf, int len, IPAddress udpIP, int udpPort, ESP3DClientType toType);
   static int pullChituLine(char* obuf, int maxlen);
   static void doChituMessage(const char* msg, size_t len);
@@ -51,8 +51,9 @@ class ChituService {
   static bool _started;
   static bool _inDatagram;
   static WiFiUDP _udp;
-  static bool _uploadMode;
-  static unsigned int _epoch;
+  static bool _uploadInprogress;
+  static bool _uploadSuccess;
+  static size_t _uploadSz;
   static bool _locked;
   static uint32_t _lockTs;
 };

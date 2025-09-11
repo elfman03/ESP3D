@@ -54,13 +54,14 @@
 extern HardwareSerial *Serials[];
 
 bool ChituService::_started = false;
-uint8_t ChituService::_uploadStatus = UNKNOW_STATE;
-bool ChituService::_uploadMode = false;
+bool ChituService::_uploadInprogress = false;
+bool ChituService::_uploadSuccess = false;
+size_t ChituService::_uploadSz = 0;
 bool ChituService::_inDatagram = false;
 WiFiUDP ChituService::_udp;
-unsigned int ChituService::_epoch = 0;
 bool ChituService::_locked = false;
 uint32_t ChituService::_lockTs = 0;
+char ChituService::_gcode_rbuf[256];
 
 //
 // Message bus message coming in from the esp3d core
@@ -121,7 +122,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
 
 bool ChituService::begin() {
   unlock();  // intentionally unpaired unlock
-  _uploadMode = false;
+  _uploadInprogress = false;
   _inDatagram=false;
   _udp.begin(3000);
   //
@@ -148,8 +149,48 @@ bool ChituService::begin() {
 //
 bool ChituService::uploadBegin(const char *filename, size_t filesize) {
   char ctmp[128];
+#ifdef SUPER_CHATTY
   sprintf(ctmp,"uploadBegin fn=%s approx_size=%d\r\n",filename,filesize);
   LOGMAGIC(ctmp);
+#endif
+
+  // take out a lock.  giving ourselves a few chances as needed
+  //
+  bool gotlock=false;
+  for(int i=0;( i<5) && !gotlock;i++) { gotlock=lock(); }
+  if(!gotlock) {
+    LOGMAGIC("Error: uploadBegin failed to acquire lock.\r\n");
+    _uploadSuccess=false;
+    _uploadInprogress=false;
+    return false;
+  }
+  //
+  // Initialize upload state
+  //
+  _uploadInprogress = true;
+  _uploadSuccess = true;
+  _uploadSz = 0;
+  //
+  // Send M28 to create file and start sending to it
+  //
+  sprintf(ctmp,"M28 %s\r\n",filename);
+  const char *result=doGcodeMessage(ctmp,strlen(ctmp),IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+  if(!result) 
+  {
+    LOGMAGIC(ctmp);
+    LOGMAGIC("ERROR - NULL response to M28\r\n");
+    _uploadInprogress=false;
+    _uploadSuccess=false;
+    // sanity... probably wont do anything but just in case
+    sprintf(ctmp,"M29\r\n");
+    doGcodeMessage(ctmp,strlen(ctmp),IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+    return false;
+  }
+
+//#ifdef SUPER_CHATTY
+  LOGMAGIC(ctmp);
+  LOGMAGIC(result);
+//#endif
   return true;
 }
 
@@ -170,12 +211,30 @@ bool ChituService::uploadMiddle(const char *buf, size_t offset, size_t len) {
 // start the print of the newly uploaded file.
 //
 bool ChituService::uploadEnd(bool printit) {
+  char ctmp[128];
+
+  // send M29 to stop recording to file
+  //
+  sprintf(ctmp,"M29\r\n");
+  const char *result=doGcodeMessage(ctmp,strlen(ctmp),IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+  if(!result) {
+    LOGMAGIC("NULL response to M29");
+    _uploadSuccess=false;
+    _uploadInprogress=false;
+    return false;
+  }
+//#ifdef SUPER_CHATTY
+  LOGMAGIC(ctmp);
+  LOGMAGIC(result);
+//#endif
+
   if(printit) {
     LOGMAGIC("uploadEnd print\r\n");
   } else {
     LOGMAGIC("uploadEnd noprint\r\n");
   }
-  return true;
+  unlock();
+  return _uploadSuccess;
 }
 
 //
@@ -225,11 +284,9 @@ int ChituService::pullChituLine(char *obuf, int max) {
   }
   obuf[olen]=0;
   //
-  //
-  //
+#ifdef SUPER_CHATTY
   char ctmp[32];
   sprintf(ctmp,"CHITU OUTPUT (%d)\r\n",olen);
-#ifdef SUPER_CHATTY
   LOGMAGIC(ctmp);
   LOGMAGIC(obuf,olen);
   LOGMAGIC("\r\n");
@@ -253,7 +310,7 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress udpIP, i
     _udp.beginPacket(udpIP,udpPort);
     _udp.write(buf,len);
     _udp.endPacket();
-  } else {
+  } else if(toType!=ESP3DClientType::no_client) {
     //
     // Send the payload where it belongs (based on ESP3DSerialService::flushData for now)
     //
@@ -273,15 +330,22 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress udpIP, i
       LOGMAGIC(buf,len);
       LOGMAGIC("\r\n");
     }
+  } else {
+    // response should be handled via return path not via messages.
+//#ifdef SUPER_CHATTY
+    LOGMAGIC("NO DESTINATION TO SEND RESPONSE HOME TO.\r\n");
+    LOGMAGIC(buf,len);
+//#endif
   }
 }
 
 //
 // Handle a Gcode request to the printer giving reasonable change for the printer to respond
+// returns pointer to the last response from gcode
 //
-void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, int udpPort, ESP3DClientType toType) {
-  char obuf[256];
+const char *ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, int udpPort, ESP3DClientType toType) {
   char ctmp[128];
+  char *paystart=0;
   int olen;
   bool okfound=false;
 
@@ -294,11 +358,11 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, 
   //
   // Send to Chitu (a) +IPD header, (b) payload, (c) trailer
   //
-  sprintf(obuf,"\r\n+IPD,4,%d:",len);
-  esp3d_serial_service.writeBytes((const uint8_t*)obuf, strlen(obuf)); // header
+  sprintf(ctmp,"\r\n+IPD,4,%d:",len);
+  esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp)); // header
   esp3d_serial_service.writeBytes((const uint8_t*)msg, len);           // payload
-  sprintf(obuf,"\r\nOK,recv\r\n",len,msg);
-  esp3d_serial_service.writeBytes((const uint8_t*)obuf, strlen(obuf)); // trailer
+  sprintf(ctmp,"\r\nOK,recv\r\n",len,msg);
+  esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp)); // trailer
   esp3d_serial_service.flush();
 
   //
@@ -314,42 +378,42 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, 
   while(!okfound) {
     int offset=0;
     for(bool completeCIP=false;!completeCIP;) {
-      olen=ChituService::pullChituLine(&obuf[offset], 255-offset);
+      olen=ChituService::pullChituLine(&_gcode_rbuf[offset], 255-offset);
       if(offset) {
 #ifdef SUPER_CHATTY
         sprintf(ctmp,"assemble multiline cipsend progress... offset=%d + olen=%d = %d\r\n--",offset,olen,offset+olen);
         LOGMAGIC(ctmp);
-        LOGMAGIC(obuf,olen+offset);
+        LOGMAGIC(_gcode_rbuf,olen+offset);
 #endif
         olen+=offset;  // if this is a line with multiple \r\n from chitu, assemble them
       }
       //
       // Verify we got a cipsend or bail.
       //
-      if(obuf!=strstr(obuf,"AT+CIPSEND=4,")) {
+      if(_gcode_rbuf!=strstr(_gcode_rbuf,"AT+CIPSEND=4,")) {
         sprintf(ctmp,"ERROR - CHITU GCODE RESPONSE NOT CIPSEND len=%d olen=%d\r\n--",len,olen);
         LOGMAGIC(ctmp);
         LOGMAGIC(msg,len);
         LOGMAGIC("--\r\n--");
-        LOGMAGIC(obuf,olen);
+        LOGMAGIC(_gcode_rbuf,olen);
         LOGMAGIC("--\r\n");
-        return;
+        return 0;
       }
       // extract the payload length
-      int paylen=atoi(&obuf[13]);
+      int paylen=atoi(&_gcode_rbuf[13]);
       // determine the payload start
-      char *paystart=strchr(obuf,'\r');
+      paystart=strchr(_gcode_rbuf,'\r');
       if(paystart) { paystart++; }
       // Sanity check log messages
       if(!paystart) { 
         LOGMAGIC("ERROR - CHITU CANNOT DETECT PAYLOAD START\r\n"); 
         LOGMAGIC(msg,len);
         LOGMAGIC("\r\n");
-        LOGMAGIC(obuf,olen);
+        LOGMAGIC(_gcode_rbuf,olen);
         LOGMAGIC("\r\n");
-        return;
+        return 0;
       }
-      int expected=paylen+int(paystart-obuf);
+      int expected=paylen+int(paystart-_gcode_rbuf);
       if(expected==olen) { 
 	completeCIP=true; 
       } else if(expected>olen) {
@@ -357,28 +421,20 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, 
         sprintf(ctmp,"WARN insufficient CIPSEND bytes (%d).  pull another line.\r\n--",olen);
         LOGMAGIC(ctmp);
         LOGMAGIC("--\r\n--");
-        LOGMAGIC(obuf);
+        LOGMAGIC(_gcode_rbuf);
         LOGMAGIC("--\r\n");
 #endif
         offset=olen;
         completeCIP=false;
       } else {
-        sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-obuf));
+        sprintf(ctmp,"ERROR UNEXPECTED LENGTH msg_len=%d expected=%d (payload_len=%d header_len=%d)\r\n",len,expected,paylen,int(paystart-_gcode_rbuf));
         LOGMAGIC(ctmp);
         LOGMAGIC(msg,len);
         LOGMAGIC("\r\n");
-        LOGMAGIC(obuf,olen);
-        return;
+        LOGMAGIC(_gcode_rbuf,olen);
+        return 0;
       }
       if(completeCIP) {
-	//
-	// Some clients (looking at Prusa slicer want a newline after the ok and before the rest of the line (noted on M105)
-	// seems to work okay for other clients so replace the space with a newline...
-	//
-	if(toType==ESP3DClientType::telnet && paystart[0]=='o' && paystart[1]=='k' && paystart[2]==' ') {
-	  paystart[2]='\n';
-	}
-
         sendResponseHome(paystart, paylen, udpIP, udpPort, toType);
         sprintf(ctmp,"OK,SEND DONE\r\n");
         esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp));
@@ -390,6 +446,7 @@ void ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, 
       }
     }
   }
+  return paystart;
 }
 
 //
@@ -584,6 +641,7 @@ bool ChituService::unlock() {
     if(_locked) {      // we are the unlocker
       success=true; 
       _locked=false; 
+      _uploadInprogress = false;  // side effect will kill any upload in process
       _lockTs=0;
     } else {           // someone else unlocked before us
       success=false;
@@ -603,18 +661,18 @@ void ChituService::handle() {
   int rct,avail;
 
   //
-  // If we cannot enter locked state skip this datagram cycle
-  //
-  if(!lock()) {
-    LOGMAGIC("ChituService::handle fail to acquire lock.\r\n");
-    return;
-  }
-  //
   // dont try to process before we are started
   // dont try to process another if we are alreay handling one
   //
   if (_started && !_inDatagram) {
      while(avail=_udp.parsePacket()) {
+       //
+       // If we cannot enter locked state skip this datagram cycle
+       //
+       if(!lock()) {
+         LOGMAGIC("ChituService::handle fail to acquire lock.\r\n");
+         return;
+       }
        _inDatagram=true;
        IPAddress remoteIp=_udp.remoteIP();
        int remotePort=_udp.remotePort();
@@ -629,12 +687,12 @@ void ChituService::handle() {
        buf[rct]=0;
        doDatagram(buf,rct,remoteIp,remotePort);
        _inDatagram=false;
+       //
+       // release the lock
+       //
+       unlock();
      }
   }
-  //
-  // release the lock
-  //
-  unlock();
 }
 
 void ChituService::end() { 
