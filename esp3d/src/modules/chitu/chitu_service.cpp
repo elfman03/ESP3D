@@ -57,6 +57,7 @@ bool ChituService::_started = false;
 bool ChituService::_uploadInprogress = false;
 bool ChituService::_uploadSuccess = false;
 size_t ChituService::_uploadSz = 0;
+size_t ChituService::_uploadStartts = 0;
 bool ChituService::_inDatagram = false;
 WiFiUDP ChituService::_udp;
 bool ChituService::_locked = false;
@@ -92,7 +93,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
     ret=true; done=true;
   }
   if(!done && message->origin==ESP3DClientType::http) {
-    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0,ESP3DClientType::webui_websocket);
+    doGcodeMessage((const char*)message->data,message->size,NULL,IPAddress(0,0,0,0),0,ESP3DClientType::webui_websocket);
     esp3d_message_manager.deleteMsg(message);
     ret=true; done=true;
   }
@@ -101,7 +102,7 @@ bool ChituService::dispatch(ESP3DMessage *message) {
     LOGMAGIC(ctmp);
     LOGMAGIC((const char*)message->data,message->size);
     LOGMAGIC("\r\n");
-    doGcodeMessage((const char*)message->data,message->size,IPAddress(0,0,0,0),0,ESP3DClientType::telnet);
+    doGcodeMessage((const char*)message->data,message->size,NULL,IPAddress(0,0,0,0),0,ESP3DClientType::telnet);
     esp3d_message_manager.deleteMsg(message);
     ret=true; done=true;
   }
@@ -145,6 +146,33 @@ bool ChituService::begin() {
 }
 
 //
+// Return millis when this upload started
+//
+size_t ChituService::uploadStartTime() {
+  return _uploadStartts;
+}
+
+//
+// Abort in progress upload
+//
+void ChituService::uploadAbort() {
+  char ctmp[64];
+  LOGMAGIC("ABORTING UPLOAD\n");
+  // shut down the M28 if it was going
+  //
+  sprintf(ctmp,"M29\r\n");
+  doGcodeMessage(ctmp,strlen(ctmp),NULL,IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+
+  // tag nonsuccess
+  _uploadSuccess=false;
+  _uploadInprogress=false;
+
+  // release upload lock
+  //
+  unlock();
+}
+
+//
 // used by http upload mode... upload is beginning for a named file
 //
 bool ChituService::uploadBegin(const char *filename, size_t filesize) {
@@ -170,11 +198,12 @@ bool ChituService::uploadBegin(const char *filename, size_t filesize) {
   _uploadInprogress = true;
   _uploadSuccess = true;
   _uploadSz = 0;
+  _uploadStartts=millis();
   //
   // Send M28 to create file and start sending to it
   //
   sprintf(ctmp,"M28 %s\r\n",filename);
-  const char *result=doGcodeMessage(ctmp,strlen(ctmp),IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+  const char *result=doGcodeMessage(ctmp,strlen(ctmp),NULL,IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
   if(!result) 
   {
     LOGMAGIC(ctmp);
@@ -183,26 +212,79 @@ bool ChituService::uploadBegin(const char *filename, size_t filesize) {
     _uploadSuccess=false;
     // sanity... probably wont do anything but just in case
     sprintf(ctmp,"M29\r\n");
-    doGcodeMessage(ctmp,strlen(ctmp),IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+    doGcodeMessage(ctmp,strlen(ctmp),NULL,IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
     return false;
   }
 
-//#ifdef SUPER_CHATTY
+#ifdef SUPER_CHATTY
   LOGMAGIC(ctmp);
   LOGMAGIC(result);
-//#endif
+#endif
   return true;
 }
 
 //
-// used by http upload mode... a payload with an offset.  should be either
-// 2048 bytes or less for the final packet
+// used by http upload mode... a payload with an offset.  should be split into
+// 1024 byte segments from http side or less for the final packet.
+//
+// NOTE: Chitu seems to be a bit laggy reporting "resend"
 //
 bool ChituService::uploadMiddle(const char *buf, size_t offset, size_t len) {
   char ctmp[128];
-  sprintf(ctmp,"uploadMiddle offset=%d len=%d\r\n",offset,len);
-  LOGMAGIC(ctmp);
-  return true;
+  unsigned char sixpack[6];
+
+  //
+  // If already errored out short circuit the return path
+  //
+  if(!_uploadInprogress || !_uploadSuccess) {
+    _uploadSuccess=false;
+    _uploadInprogress=false;
+    return false;
+  }
+
+  // populate the sixpack (packet trailer)
+  // offset
+  //
+  sixpack[0]=0x0ff & offset;
+  sixpack[1]=0x0ff & (offset>>8);
+  sixpack[2]=0x0ff & (offset>>16);
+  sixpack[3]=0x0ff & (offset>>24);
+  //
+  // checksum
+  //
+  unsigned char cksum=0;
+  for(int i=0;i<len;i++) { cksum=cksum^(unsigned char)buf[i]; }
+  cksum=cksum^sixpack[0]^sixpack[1]^sixpack[2]^sixpack[3];
+  sixpack[4]=cksum;
+  //
+  // magic byte
+  //
+  sixpack[5]=0x83;
+
+  //
+  // Send payload and sixpack to the Chitu
+  //
+  const char *result=doGcodeMessage(buf,len,sixpack,IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+
+  if(result[0]=='o' && result[1]=='k') {
+#ifdef SUPER_CHATTY
+  sprintf(ctmp,"uploadMiddle offset=%d len=%d rlen=%d -- sixpack off=0x%02x%02x%02x%02x sum=0x%02x tail=0x%02x\r\n",
+               offset,len,strlen(result),sixpack[0],sixpack[1],sixpack[2],sixpack[3],sixpack[4],sixpack[5]);
+    LOGMAGIC(ctmp);
+    LOGMAGIC(result);
+#endif
+    _uploadSz+=len;
+    return true;
+  } else {
+    sprintf(ctmp,"Upload Error offset=%d len=%d rlen=%d -- sixpack off=0x%02x%02x%02x%02x sum=0x%02x tail=0x%02x\r\n",
+	         offset,len,strlen(result),sixpack[0],sixpack[1],sixpack[2],sixpack[3],sixpack[4],sixpack[5]);
+    LOGMAGIC(ctmp);
+    LOGMAGIC(result);
+    LOGMAGIC("\r\n");
+    _uploadSuccess=false;
+    _uploadInprogress=false;
+    return false;
+  }
 }
 
 //
@@ -210,28 +292,49 @@ bool ChituService::uploadMiddle(const char *buf, size_t offset, size_t len) {
 // or not it was successful.  Also.  the incoming boolean indicates if we should
 // start the print of the newly uploaded file.
 //
-bool ChituService::uploadEnd(bool printit) {
+bool ChituService::uploadEnd(const char *filename, bool printit) {
   char ctmp[128];
 
   // send M29 to stop recording to file
   //
   sprintf(ctmp,"M29\r\n");
-  const char *result=doGcodeMessage(ctmp,strlen(ctmp),IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+  const char *result=doGcodeMessage(ctmp,strlen(ctmp),NULL,IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
   if(!result) {
     LOGMAGIC("NULL response to M29");
     _uploadSuccess=false;
     _uploadInprogress=false;
     return false;
   }
-//#ifdef SUPER_CHATTY
+
+  //
+  // If already errored out short circuit the return path.  We do this after the M29
+  // so that we are more assured to issue the M29 command after a failure
+  //
+  if(!_uploadInprogress || !_uploadSuccess) {
+    LOGMAGIC("Upload Failure noted");
+    _uploadSuccess=false;
+    _uploadInprogress=false;
+    return false;
+  }
+
+#ifdef SUPER_CHATTY
   LOGMAGIC(ctmp);
   LOGMAGIC(result);
-//#endif
+#endif
 
   if(printit) {
-    LOGMAGIC("uploadEnd print\r\n");
-  } else {
-    LOGMAGIC("uploadEnd noprint\r\n");
+    //
+    // initiate a print with Chitu specific command M6030
+    // Chitu command to print named file (including showing on gui) 
+    // The I1 instructs it not to start from a savepoint
+    //
+    sprintf(ctmp,"M6030 ':%s' I1\r\n",filename);
+    result=doGcodeMessage(ctmp,strlen(ctmp),NULL,IPAddress(0,0,0,0),0,ESP3DClientType::no_client);
+#ifdef SUPER_CHATTY
+    LOGMAGIC("PRINT INITIATION: ");
+    LOGMAGIC(ctmp);
+    LOGMAGIC(result);
+#endif
   }
   unlock();
   return _uploadSuccess;
@@ -330,12 +433,27 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress udpIP, i
       LOGMAGIC(buf,len);
       LOGMAGIC("\r\n");
     }
+  } else if(_uploadInprogress && strstr(buf,"resend ")==buf) {
+    //
+    // response should be handled via return path not via messages.
+    // chitu may send a stale resend request (e.g., checksum failure) after saying "ok" 
+    // already.  It will be caught by a subsequent payload send or if it was the last 
+    // payload by the M29 command.  Detect at this point and declare failure for the upload.
+    //
+    char ctmp[64];
+    sprintf(ctmp,"UPLOAD LINE FAILURE (%d):",len);
+    LOGMAGIC(ctmp);
+    LOGMAGIC(buf,len);
+    LOGMAGIC("\r\n");
+    _uploadInprogress=false;
+    _uploadSuccess=false;
   } else {
     // response should be handled via return path not via messages.
-//#ifdef SUPER_CHATTY
-    LOGMAGIC("NO DESTINATION TO SEND RESPONSE HOME TO.\r\n");
+#ifdef SUPER_CHATTY
+    LOGMAGIC("NO DESTINATION TO SEND RESPONSE HOME TO (%d).\r\n",len);
     LOGMAGIC(buf,len);
-//#endif
+    LOGMAGIC("\r\n");
+#endif
   }
 }
 
@@ -343,7 +461,7 @@ void ChituService::sendResponseHome(const char *buf, int len, IPAddress udpIP, i
 // Handle a Gcode request to the printer giving reasonable change for the printer to respond
 // returns pointer to the last response from gcode
 //
-const char *ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress udpIP, int udpPort, ESP3DClientType toType) {
+const char *ChituService::doGcodeMessage(const char *msg, size_t len, unsigned char *sixpack, IPAddress udpIP, int udpPort, ESP3DClientType toType) {
   char ctmp[128];
   char *paystart=0;
   int olen;
@@ -356,11 +474,16 @@ const char *ChituService::doGcodeMessage(const char *msg, size_t len, IPAddress 
 #endif
 
   //
-  // Send to Chitu (a) +IPD header, (b) payload, (c) trailer
+  // Send to Chitu (a) +IPD header, (b) payload, [c optional sixpack finalizer] (d) trailer
   //
-  sprintf(ctmp,"\r\n+IPD,4,%d:",len);
+  size_t lenplus=len;
+  if(sixpack) { lenplus+=6; }
+  sprintf(ctmp,"\r\n+IPD,4,%d:",lenplus);
   esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp)); // header
   esp3d_serial_service.writeBytes((const uint8_t*)msg, len);           // payload
+  if(sixpack) {
+    esp3d_serial_service.writeBytes((const uint8_t*)sixpack, 6);       // sixpack finalizer
+  }
   sprintf(ctmp,"\r\nOK,recv\r\n",len,msg);
   esp3d_serial_service.writeBytes((const uint8_t*)ctmp, strlen(ctmp)); // trailer
   esp3d_serial_service.flush();
@@ -581,7 +704,7 @@ void ChituService::doDatagram(char*buf, int sz, IPAddress udpIP, int udpPort) {
     //_udp.endPacket();
     sendResponseHome(ctmp, strlen(ctmp), udpIP, udpPort, ESP3DClientType::no_client);
   } else {
-    doGcodeMessage(buf,sz,udpIP,udpPort,ESP3DClientType::no_client);
+    doGcodeMessage(buf,sz,NULL,udpIP,udpPort,ESP3DClientType::no_client);
   }
 }
 

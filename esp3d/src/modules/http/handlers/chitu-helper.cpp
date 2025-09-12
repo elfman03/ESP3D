@@ -52,12 +52,30 @@ void HTTP_Server::chituFakeAstrobox() {
 // 
 void HTTP_Server::chituUploadFN() {
   bool success;
-  const char *print=_webserver->arg("print").c_str();
-  success=ChituService::uploadEnd(!strcmp(print,"true"));
+  char ctmp[128];
+  HTTPUpload& upload = _webserver->upload();
+
+  const bool print=!strcmp(_webserver->arg("print").c_str(),"true");
+
+  size_t startts=ChituService::uploadStartTime();
+
+  // finalize the upload and initiate print if desires
+  //
+  success=ChituService::uploadEnd(upload.filename.c_str(),print);
+
+  // respond to the http request with success or failure.
+  //
   if(success) {
-    _webserver->send(200, "text/plain", "Upload Complete");
+    uint32_t duration=millis()-startts;
+    sprintf(ctmp,"Upload '%s' complete with print=%s.  %d bytes in %dms (%0.2f KB/s)\r\n",
+                 upload.filename.c_str(),print?"true":"false",upload.totalSize,duration,
+                 (upload.totalSize/1024.0)/(duration/1000.0));
+    LOGMAGIC(ctmp);
+    _webserver->send(200, "text/plain", ctmp);
   } else {
-    _webserver->send(422, "text/plain", "Upload Failure");
+    sprintf(ctmp,"Upload Failure '%s'.\r\n", upload.filename.c_str());
+    LOGMAGIC(ctmp);
+    _webserver->send(422, "text/plain", ctmp);
   }
 }
 
@@ -83,15 +101,24 @@ void HTTP_Server::chituUploadUFN() {
     ChituService::uploadBegin(upload.filename.c_str(),fileSize);
   } else if(upload.status == UPLOAD_FILE_WRITE) {
     //
-    // file upload payload (2048 bytes or less for the last payload)
+    // Based on webserver api, file payload is 2048 bytes or less for the last payload
+    // Write logic that would generalize to longer if needed.
+    // Send it to Chitu in 1K chunks.  We experimentally determined that 2K results
+    // in errors.  Chitu seems to be designed to accept datagram sized chunks that would
+    // be less than about 1300 bytes.
     //
-    ChituService::uploadMiddle((const char *)upload.buf,upload.totalSize,upload.currentSize);
+    for(size_t offset=0;offset<upload.currentSize;offset+=1024) {
+      ChituService::uploadMiddle((const char *)&upload.buf[offset], offset+upload.totalSize,
+		                 (upload.currentSize-offset>1024)?1024:upload.currentSize-offset);
+    }
   } else if(upload.status == UPLOAD_FILE_END) {
     //
     // file upload ending.  we would have called the chitu end from here but
     // we have to wait until the final callback in order to see the arguments like
     // whether I should print or not.  So we just NOP at this point.
     //
+  } else if(upload.status == UPLOAD_FILE_ABORTED) {
+    ChituService::uploadAbort();
   } else {
     LOGMAGIC("ERROR: UPLOAD_FILE UNKNOWN STATE\r\n");
   }

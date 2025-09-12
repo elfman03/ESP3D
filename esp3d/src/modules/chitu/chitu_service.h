@@ -36,11 +36,13 @@ class ChituService {
   static bool started() { return _started; }
   static bool uploadBegin(const char* filename, size_t filesize);
   static bool uploadMiddle(const char* buf, size_t offset, size_t len);
-  static bool uploadEnd(bool printit);
+  static bool uploadEnd(const char* filename, bool printit);
+  static void uploadAbort();
+  static size_t uploadStartTime();
 
  private:
   static char _gcode_rbuf[256];
-  static const char *doGcodeMessage(const char* msg, size_t len, IPAddress udpIP, int udpPort, ESP3DClientType toType);
+  static const char *doGcodeMessage(const char* msg, size_t len, unsigned char *sixpack, IPAddress udpIP, int udpPort, ESP3DClientType toType);
   static void sendResponseHome(const char* buf, int len, IPAddress udpIP, int udpPort, ESP3DClientType toType);
   static int pullChituLine(char* obuf, int maxlen);
   static void doChituMessage(const char* msg, size_t len);
@@ -53,6 +55,7 @@ class ChituService {
   static WiFiUDP _udp;
   static bool _uploadInprogress;
   static bool _uploadSuccess;
+  static uint32_t _uploadStartts;
   static size_t _uploadSz;
   static bool _locked;
   static uint32_t _lockTs;
