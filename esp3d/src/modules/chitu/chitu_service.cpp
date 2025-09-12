@@ -336,6 +336,8 @@ bool ChituService::uploadEnd(const char *filename, bool printit) {
     LOGMAGIC(result);
 #endif
   }
+
+  _uploadInprogress=false;
   unlock();
   return _uploadSuccess;
 }
