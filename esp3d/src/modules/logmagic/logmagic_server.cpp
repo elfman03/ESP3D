@@ -80,8 +80,8 @@ bool LogMagic_Server::begin(uint16_t port, bool debug) {
   end();
   // Get logmagic port
   if (port == 0) {
-    // 9080 if telnet bridge is at 8080
-    _port = 1000+ESP3DSettings::readUint32(ESP_TELNET_PORT);
+    // 8023 if telnet bridge is at 23
+    _port = 8000+ESP3DSettings::readUint32(ESP_TELNET_PORT);
   } else {
     _port = port;
   }
