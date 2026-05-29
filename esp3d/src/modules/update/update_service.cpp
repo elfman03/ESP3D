@@ -132,7 +132,7 @@ bool processString(const char** keysval, const uint16_t* keypos,
                    char& T, int& P) {
   for (uint i = 0; i < size; i++) {
     if (strcasecmp(keysval[i], key) == 0) {
-      // if it is a previouly saved scrambled password ignore it
+      // if it is a previously saved scrambled password ignore it
       if (strcasecmp(value, "********") != 0) {
         T = 'S';
         P = keypos[i];
@@ -340,8 +340,6 @@ bool processingFileFunction(const char* section, const char* key,
           b = ESP_NO_NOTIFICATION;
         } else if (strcasecmp("PushOver", value) == 0) {
           b = ESP_PUSHOVER_NOTIFICATION;
-        } else if (strcasecmp("Line", value) == 0) {
-          b = ESP_LINE_NOTIFICATION;
         } else if (strcasecmp("Email", value) == 0) {
           b = ESP_EMAIL_NOTIFICATION;
         } else if (strcasecmp("Telegram", value) == 0) {

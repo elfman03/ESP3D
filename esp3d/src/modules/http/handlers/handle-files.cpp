@@ -63,7 +63,9 @@ void HTTP_Server::handleFSFileList() {
   }
   // get current path
   if (_webserver->hasArg("path")) {
-    path += _webserver->arg("path");
+    path = _webserver->arg("path");
+  } else {
+    path = "/";
   }
   // to have a clean path
   path.trim();
@@ -88,7 +90,7 @@ void HTTP_Server::handleFSFileList() {
           status = shortname + " deleted";
           // what happen if no "/." and no other subfiles for SPIFFS like?
           String ptmp = path;
-          if ((path != "/") && (path[path.length() - 1] = '/')) {
+          if ((path != "/") && (path[path.length() - 1] == '/')) {
             ptmp = path.substring(0, path.length() - 1);
           }
           if (!ESP_FileSystem::exists(ptmp.c_str())) {
@@ -144,7 +146,7 @@ void HTTP_Server::handleFSFileList() {
   buffer2send.reserve(1200);
   buffer2send = "{\"files\":[";
   String ptmp = path;
-  if ((path != "/") && (path[path.length() - 1] = '/')) {
+  if ((path != "/") && (path[path.length() - 1] == '/')) {
     ptmp = path.substring(0, path.length() - 1);
   }
   _webserver->setContentLength(CONTENT_LENGTH_UNKNOWN);

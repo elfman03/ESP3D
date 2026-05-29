@@ -486,7 +486,7 @@ void ESP3DCommands::execute_internal_command(int cmd, int cmd_params_pos,
     // Change ETH STA IP mode (DHCP/STATIC)
     //[ESP116]<mode>pwd=<admin password>
     case 116:
-      ESP102(cmd_params_pos, msg);
+      ESP116(cmd_params_pos, msg);
       break;
     // Change ETH STA IP/Mask/GW
     //[ESP117]IP=<IP> MSK=<IP> GW=<IP> pwd=<admin password>
@@ -1498,8 +1498,9 @@ bool ESP3DCommands::dispatch(ESP3DMessage *msg) {
       // replace end of line with space
       tmp.replace("\n", " ");
       tmp.replace("\r", "");
+      tmp.trim();
       tmp += "\n";
-      //Override lock from Marlin if error was displayed previouly preventing any update
+      //Override lock from Marlin if error was displayed previously preventing any update
       if (ESP3DSettings::GetFirmwareTarget() == MARLIN ||
           ESP3DSettings::GetFirmwareTarget() == MARLIN_EMBEDDED) {
         tmp = "M117\n" + tmp;
