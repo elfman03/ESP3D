@@ -604,7 +604,7 @@ void ChituService::doChituMessage(const char *msg, size_t len) {
     //
     //sprintf(ctmp,"+GMR:00,00,00,00,00,00,00,00 V10.0.12a\r\n\r\nOK\r\n");
     //sprintf(ctmp,"+GMR:00,00,00,00,00,00,00,00 V%s\n\r\nOK\r\n",FW_VERSION);
-    sprintf(ctmp,"+GMR:00,00,00,00,00,00,00,00 V%s\n\r\nOK\r\n","ESP3d-3ce");
+    sprintf(ctmp,"+GMR:00,00,00,00,00,00,00,00 V%s\n\r\nOK\r\n","ESP3d-31c");
   } else if(msg==strstr(msg,"AT+CIFSR\r\n")) {
     //
     // real ESP returns these lines.  
